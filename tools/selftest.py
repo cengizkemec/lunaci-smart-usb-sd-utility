@@ -316,6 +316,17 @@ if os.path.isfile(cfg_path):
     with open(cfg_path, "rb") as fh:
         cfg_backup = fh.read()
 
+# error.log temiz baslamali: canli oturumdan sonra HIC kayit olmamali
+errlog = os.path.join(ROOT, "error.log")
+errlog_backup = None
+if os.path.isfile(errlog):
+    with open(errlog, "rb") as fh:
+        errlog_backup = fh.read()
+    try:
+        os.remove(errlog)
+    except OSError:
+        pass
+
 app = None
 try:
     import customtkinter as ctk  # noqa: E402
@@ -324,6 +335,26 @@ try:
 
     app = LunaciApp()
     check("LunaciApp olusturuldu", True)
+
+    # Ilerleme cubugu: diskpart'in kullandigi "belirsiz mod" + bozuk deger
+    # hicbir sekilde hata firlatmamali (CTk start() argumansizdir).
+    try:
+        app._on_progress(None)
+        ind = app._indeterminate is True
+        app._on_progress(42.5)
+        det = app._indeterminate is False
+        bad_ok = True
+        try:
+            app._on_progress("bozuk-deger")
+            app._on_progress(object())
+        except Exception:  # noqa: BLE001
+            bad_ok = False
+        check("_on_progress belirsiz mod (diskpart) hata vermedi", True)
+        check("belirsiz moda gecildi", ind)
+        check("belirli moda donuldu", det)
+        check("_on_progress bozuk degeri yutuyor", bad_ok)
+    except Exception as exc:  # noqa: BLE001
+        check("_on_progress dayaniklilik", False, exc)
 
     # bozuk olay enjekte et: _poll DIE olmamali + gercek 3 sn'lik canli GUI oturumu
     from datetime import datetime  # noqa: E402
@@ -379,6 +410,10 @@ try:
     check("hedef klasor sorgusu arka planda tamamlandi",
           results.get("target_cache_ts") is True,
           results.get("target_cache_ts"))
+    # Canli oturumda (bilerek bozuk olaylar dahil) HICBIR UI hata kaydi olmamali
+    err_bytes = os.path.getsize(errlog) if os.path.isfile(errlog) else 0
+    check("bozuk olaylar UI hata kaydi uretmedi (error.log bos)", err_bytes == 0,
+          f"{err_bytes} bayt")
     app = None
 except Exception as exc:  # noqa: BLE001
     import traceback
@@ -400,6 +435,15 @@ finally:
                 fh.write(cfg_backup)
         except Exception:
             pass
+    # Test sirasinda olusan error.log'u temizle / eski haline dondur
+    try:
+        if errlog_backup is not None:
+            with open(errlog, "wb") as fh:
+                fh.write(errlog_backup)
+        elif os.path.isfile(errlog):
+            os.remove(errlog)
+    except Exception:
+        pass
 
 # ------------------------------------------------------------------ ozet
 print("\n" + "=" * 60)

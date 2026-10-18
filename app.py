@@ -596,17 +596,23 @@ class LunaciApp(ctk.CTk):
         self._refresh_actions()
 
     def _on_progress(self, pct, text: str | None = None) -> None:
-        if pct is None:
-            if not self._indeterminate:
-                self.prog.configure(mode="indeterminate")
-                self.prog.start(12)
-                self._indeterminate = True
-        else:
-            if self._indeterminate:
-                self.prog.stop()
-                self.prog.configure(mode="determinate")
-                self._indeterminate = False
-            self.prog.set(max(0.0, min(1.0, float(pct) / 100.0)))
+        """Ilerleme cubugunu gunceller. Bozuk/eksik deger gelse bile arayuz
+        ASLA hata vermemeli (beklenmeyen tur degerleri sessizce yutulur)."""
+        try:
+            if pct is None:
+                # Olculemeyen asama (or. diskpart): belirsiz mod
+                if not self._indeterminate:
+                    self.prog.configure(mode="indeterminate")
+                    self.prog.start()          # CTk: start() argümansiz
+                    self._indeterminate = True
+            else:
+                if self._indeterminate:
+                    self.prog.stop()
+                    self.prog.configure(mode="determinate")
+                    self._indeterminate = False
+                self.prog.set(max(0.0, min(1.0, float(pct) / 100.0)))
+        except (TypeError, ValueError, tk.TclError):
+            pass
         if text:
             self._set_status(text)
 

@@ -39,6 +39,10 @@ The app could previously hang and stop responding. The root causes were found an
   when the app lives inside a OneDrive-synced folder). The final write is flushed on exit.
 - **Folder existence check is now asynchronous.** Checking the selected source folder no
   longer performs a blocking filesystem/drive call on the UI thread.
+- **Progress bar fixed in indeterminate mode.** While an unmeasurable phase runs (for
+  example while `diskpart` works) the progress bar used an unsupported argument and raised
+  an internal error every time. It now animates correctly, and unexpected progress values
+  are ignored instead of surfacing as errors.
 - **Cancel is honoured everywhere.** Copy, ISO write, ZIP write/extract and the health test
   all stop within a couple of seconds, and processes are terminated cleanly.
 
@@ -81,11 +85,13 @@ The app could previously hang and stop responding. The root causes were found an
 
 ## Verification
 
-This release was validated with an automated 38-check self-test suite covering compilation,
-translation completeness, theme integrity, asynchronous settings persistence, the FAT32
-guard, process cancellation, a real 1200-file copy + ZIP round-trip on a virtual drive,
-monitor resilience and a live GUI session. Additionally, the packaged executable was
-launched and smoke-tested to confirm it starts cleanly with no errors.
+This release was validated with an automated **43-check self-test suite** covering
+compilation, translation completeness, theme integrity, asynchronous settings persistence,
+the FAT32 guard, process cancellation, a real 1200-file copy + ZIP round-trip on a virtual
+drive, monitor resilience, progress-bar handling and a live GUI session in which deliberately
+malformed events are injected — the suite asserts that the interface survives them and that
+**not a single UI error** is recorded. Additionally, the packaged executable was launched and
+smoke-tested to confirm it starts cleanly with no errors.
 
 ## Requirements
 
