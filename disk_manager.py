@@ -7,7 +7,7 @@ import os
 import re
 import shutil
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Callable, List, Optional, Sequence
 
 from i18n import tr
@@ -142,6 +142,20 @@ def _drive_type(letter: str) -> int:
         return int(ctypes.windll.kernel32.GetDriveTypeW(f"{letter}:\\"))
     except Exception:
         return 0
+
+
+def fast_drive_letters() -> set:
+    """GetLogicalDrives bitmask'i — subprocess'siz, milisaniyelik harf listesi."""
+    try:
+        mask = ctypes.windll.kernel32.GetLogicalDrives()
+        return {chr(ord("A") + i) for i in range(26) if mask & (1 << i)}
+    except Exception:
+        return set()
+
+
+# diskpart sure asmalari (saniye): hizli bicimlendirme 10 dk, tam tarama 12 saat
+DP_TIMEOUT_QUICK = 600.0
+DP_TIMEOUT_FULL = 12 * 3600.0
 
 
 def _has_error(lines: Sequence[str]) -> bool:
@@ -351,7 +365,8 @@ def get_disk_number(letter: str) -> Optional[int]:
 # -------------------------------------------------------- biçimlendirme -----
 
 def run_format(logger: Emitter, letter: str, fs_key: str, label: str,
-               quick: bool, size_hint: int = 0) -> bool:
+               quick: bool, size_hint: int = 0,
+               cancel: Optional[threading.Event] = None) -> bool:
     """diskpart ile biçimlendirir. Önce volume odaklı, olmazsa clean + bölümleme."""
     letter = letter.strip().upper()
     if fs_key.upper().startswith("EXT4"):
@@ -361,24 +376,36 @@ def run_format(logger: Emitter, letter: str, fs_key: str, label: str,
     if not fs_part:
         logger.error(tr("fmt.bad_fs", fs=fs_key))
         return False
+    # Windows, 32 GB uzerinde FAT32 olusturamaz. Eger yine de denerseniz
+    # diskpart basarisiz olur ve yedek "clean" yolu diski tamamen SILER →
+    # veri kaybi. Bu yuzden HIC BASLATMADAN DURDURUYORUZ.
     if fs_key == "FAT32" and size_hint > 32 * GB:
-        logger.warn(tr("fmt.fat32_warn"))
+        logger.error(tr("fmt.fat32_block", s=human_bytes(size_hint)))
+        return False
+    if cancel is not None and cancel.is_set():
+        logger.warn(tr("ui.cancelled"))
+        return False
     label = (label or "").replace('"', "").strip()
     fmt = (f"format fs={fs_part} override" + (" quick" if quick else "")
            + (f' label="{label}"' if label else ""))
 
     mode = tr("dlg.mode.quick") if quick else tr("dlg.mode.full")
     logger.info(tr("fmt.start", mode=mode, l=letter, fs=fs_key))
+    timeout = DP_TIMEOUT_QUICK if quick else DP_TIMEOUT_FULL
 
     script = [f"select volume {letter}", fmt]
     logger.cmd("diskpart » " + " ; ".join(script))
-    code, lines = run_diskpart(script, on_line=logger.cmd)
+    code, lines = run_diskpart(script, on_line=logger.cmd, timeout=timeout,
+                               cancel=cancel)
     if not _has_error(lines) and code == 0:
         if label:
             logger.ok(tr("fmt.ok_l", l=letter, fs=fs_key, ad=label))
         else:
             logger.ok(tr("fmt.ok", l=letter, fs=fs_key))
         return True
+    if cancel is not None and cancel.is_set():
+        logger.warn(tr("ui.cancelled"))
+        return False
 
     logger.warn(tr("fmt.fallback_warn"))
     dev = fresh_device(letter)
@@ -389,8 +416,9 @@ def run_format(logger: Emitter, letter: str, fs_key: str, label: str,
     script2 = [f"select disk {disk_number}", "clean", "create partition primary",
                fmt, f"assign letter={letter}"]
     logger.cmd("diskpart » " + " ; ".join(script2))
-    code, lines = run_diskpart(script2, on_line=logger.cmd)
-    run_diskpart(["rescan"], on_line=logger.cmd)
+    code, lines = run_diskpart(script2, on_line=logger.cmd, timeout=timeout,
+                               cancel=cancel)
+    run_diskpart(["rescan"], on_line=logger.cmd, timeout=60)
     if not _has_error(lines) and code == 0:
         logger.ok(tr("fmt.clean_ok", l=letter, fs=fs_key))
         return True
@@ -400,7 +428,8 @@ def run_format(logger: Emitter, letter: str, fs_key: str, label: str,
 
 # ------------------------------------------------------------- onarım -------
 
-def run_repair(logger: Emitter, letter: str) -> bool:
+def run_repair(logger: Emitter, letter: str,
+               cancel: Optional[threading.Event] = None) -> bool:
     """Yazma korumasını temizler, chkdsk /f /r çalıştırır; RAW ise bölümü yeniler."""
     letter = letter.strip().upper()
     dev = fresh_device(letter)
@@ -419,7 +448,8 @@ def run_repair(logger: Emitter, letter: str) -> bool:
     else:
         script = [f"select volume {letter}", "attributes volume clear readonly"]
     logger.cmd("diskpart » " + " ; ".join(script))
-    code, lines = run_diskpart(script, on_line=logger.cmd)
+    code, lines = run_diskpart(script, on_line=logger.cmd, timeout=120,
+                               cancel=cancel)
     if not _has_error(lines) and code == 0:
         logger.ok(tr("rep.readonly_ok"))
     else:
@@ -427,7 +457,10 @@ def run_repair(logger: Emitter, letter: str) -> bool:
 
     logger.info(tr("rep.chkdsk_start"))
     code, lines = run_shell(f"echo Y| chkdsk {letter}: /f /r",
-                            on_line=logger.cmd, timeout=6 * 3600)
+                            on_line=logger.cmd, timeout=6 * 3600, cancel=cancel)
+    if cancel is not None and cancel.is_set():
+        logger.warn(tr("ui.cancelled"))
+        return False
     if code == 0:
         logger.ok(tr("rep.chkdsk_ok"))
     else:
@@ -438,10 +471,11 @@ def run_repair(logger: Emitter, letter: str) -> bool:
         fs = dev2.suggested_fs()
         logger.warn(tr("rep.raw_warn"))
         logger.info(tr("rep.raw_fs", fs=fs))
-        if not run_format(logger, letter, fs, "LUNACI", quick=True, size_hint=dev2.size):
+        if not run_format(logger, letter, fs, "LUNACI", quick=True,
+                          size_hint=dev2.size, cancel=cancel):
             return False
 
-    run_diskpart(["rescan"], on_line=logger.cmd)
+    run_diskpart(["rescan"], on_line=logger.cmd, timeout=60)
     logger.ok(tr("rep.done"))
     return True
 
@@ -449,7 +483,14 @@ def run_repair(logger: Emitter, letter: str) -> bool:
 # ----------------------------------------------------- izleme iş parçacığı --
 
 class DeviceMonitor(threading.Thread):
-    """Arka planda cihazları tarar; tak/çıkar olaylarını ve listeyi yayınlar."""
+    """Arka planda cihazları tarar; tak/çıkar olaylarını ve listeyi yayınlar.
+
+    Hizli yol: her turda yalnizca ``GetLogicalDrives`` bitmask'i okunur
+    (subprocess yok, ~0 ms). Harf kumasi DEGISMEDIGI surece PowerShell'e
+    hiç basvurulmaz; boyut/bos alan bilgisi ucuz ``shutil.disk_usage`` ile
+    tazelenir. Boylece arka planda surekli PowerShell prosesi dogmaz ve
+    arayuz hep guncel kalir.
+    """
 
     def __init__(self, emit: Callable, interval: float = 3.0) -> None:
         super().__init__(daemon=True, name="lunaci-monitor")
@@ -459,31 +500,86 @@ class DeviceMonitor(threading.Thread):
         self._wake = threading.Event()
         self._logger = Emitter(emit, task="monitor")
         self._letters: set = set()
+        self._known: set = set()          # en son gorulen TUM harfler
+        self._devices: List[Device] = []  # onbellek
+        self._force = True                # ilk turda hep tam tarama
 
     def stop(self) -> None:
         self._stop.set()
         self._wake.set()
 
-    def request_poll(self) -> None:
+    def request_poll(self, force: bool = True) -> None:
+        """Bir turu hemen calistir; ``force`` tam PowerShell taramasi zorlar."""
+        if force:
+            self._force = True
         self._wake.set()
+
+    def _full_detect(self) -> List[Device]:
+        try:
+            devices = detect_devices(self._logger)
+        except Exception as exc:
+            self._logger.error(tr("mon.error", e=exc))
+            devices = []
+        self._devices = devices
+        return devices
+
+    @staticmethod
+    def _refresh_usage(devices: List[Device]) -> List[Device]:
+        """Bilinen cihazlarin boyut/bos alanini subprocess'siz tazeler."""
+        out: List[Device] = []
+        for dev in devices:
+            try:
+                u = shutil.disk_usage(f"{dev.letter}:\\")
+            except OSError:
+                continue  # cikti
+            out.append(replace(dev, size=u.total, free=u.free))
+        return out
 
     def run(self) -> None:
         while not self._stop.is_set():
+            # Bu dongu ASLA olmemeli: herhangi bir beklenmeyen hata olsa bile
+            # bir sonraki turda cihaz algilama devam eder (arayuz donmaz).
             try:
-                devices = detect_devices(self._logger)
+                self._tick()
             except Exception as exc:
-                self._logger.error(tr("mon.error", e=exc))
-                devices = []
-            letters = {d.letter for d in devices}
-            for dev in devices:
-                if dev.letter not in self._letters:
-                    self._logger.ok(tr("mon.added", d=dev.display, f=dev.fstype_display))
-            for letter in sorted(self._letters - letters):
-                self._logger.warn(tr("mon.removed", l=letter))
-            self._letters = letters
-            try:
-                self.emit(("devices", devices))
-            except Exception:
-                pass
+                try:
+                    self._logger.error(tr("mon.error", e=exc))
+                except Exception:
+                    pass
             self._wake.wait(self.interval)
             self._wake.clear()
+
+    def _tick(self) -> None:
+        letters = fast_drive_letters()
+        need_full = (self._force or letters != self._known
+                     or not self._devices)
+        if need_full:
+            devices = self._full_detect()
+            # PowerShell hicbir sey bulamadiysa ama surucu harfi varsa
+            # sonraki turda tekrar dene (algilama gecici olarak basarisiz olabilir).
+            if not devices and letters:
+                self._known = set()
+            else:
+                self._known = letters
+            self._force = False
+        else:
+            devices = self._refresh_usage(self._devices)
+            if len(devices) != len(self._devices):
+                # bu sirada bir cihaz kaybolmus → tam tarama
+                devices = self._full_detect()
+                self._known = fast_drive_letters()
+            else:
+                self._devices = devices
+
+        dev_letters = {d.letter for d in devices}
+        for dev in devices:
+            if dev.letter not in self._letters:
+                self._logger.ok(tr("mon.added", d=dev.display,
+                                   f=dev.fstype_display))
+        for letter in sorted(self._letters - dev_letters):
+            self._logger.warn(tr("mon.removed", l=letter))
+        self._letters = dev_letters
+        try:
+            self.emit(("devices", devices))
+        except Exception:
+            pass

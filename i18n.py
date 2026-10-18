@@ -89,6 +89,9 @@ TR = {
     "dlg.zipfolder.title": "Klasörü ZIP Yaz",
     "dlg.zipfolder.body": "'{name}' klasörü {l}: diskinde ZIP dosyası olarak "
                           "oluşturulacak.\nDevam edilsin mi?",
+    "dlg.copy.title": "Klasörü Diske Yaz",
+    "dlg.copy.body": "'{name}' klasörünün içeriği {l}: ({dev}) diskinin köküne "
+                     "yazılacak.\nDevam edilsin mi?",
     "dlg.ext4.title": "Desteklenmiyor",
     "dlg.ext4.body": "EXT4, Windows üzerinde biçimlendirilemez.",
     "dlg.about.title": "Hakkında",
@@ -113,6 +116,7 @@ TR = {
     "ui.console_saved": "Konsol kaydedildi: {p}",
     "ui.console_error": "Konsol kaydedilemedi: {e}",
     "ui.cancel_req": "İptal isteği gönderildi...",
+    "ui.cancelled": "İşlem kullanıcı tarafından iptal edildi.",
     "ui.reports_open": "Rapor klasörü: {p}",
     # ---- izleyici ----
     "mon.added": "Cihaz takıldı → {d}  [{f}]",
@@ -124,6 +128,9 @@ TR = {
     "fmt.bad_fs": "Desteklenmeyen dosya sistemi: {fs}",
     "fmt.fat32_warn": "Windows, 32 GB üzeri sürücülerde FAT32 oluşturmayı desteklemez; "
                       "işlem başarısız olabilir. exFAT önerilir.",
+    "fmt.fat32_block": "İşlem DURDURULDU: {s} diskte FAT32 oluşturulamaz (Windows "
+                       "32 GB sınırı). Disk silinmeden önce iptal edildi — exFAT veya "
+                       "NTFS seçin.",
     "fmt.start": "Biçimlendirme ({mode}) → {l}:  [{fs}]",
     "fmt.ok": "{l}: biçimlendirildi → {fs}",
     "fmt.ok_l": '{l}: biçimlendirildi → {fs}  ad="{ad}"',
@@ -152,6 +159,8 @@ TR = {
     "copy.cancelled": "Kopyalama iptal edildi.",
     "copy.partial_removed": "Kopyalama iptal edildi; yarım dosya silindi.",
     "copy.file_error": "  {rel} → {e}",
+    "copy.file_log_skipped": "Dosya başına ayrıntılı log, {n} dosya nedeniyle "
+                             "kapatıldı (özeti aşağıdaki satırda görebilirsiniz).",
     "copy.done": "Kopyalama tamamlandı: {c} kopyalandı, {s} atlandı, {e} hata · "
                  "{w} / {t} sn ({sp} MB/s)",
     "copy.progress": "Kopyalanıyor %{p}",
@@ -285,6 +294,9 @@ EN = {
                     "{l}: ({dev}).\n\nExisting files with the same names may be "
                     "overwritten. Continue?",
     "dlg.zipfolder.title": "Zip Folder",
+    "dlg.copy.title": "Write Folder to Disk",
+    "dlg.copy.body": "The contents of folder '{name}' will be written to the root "
+                     "of drive {l}: ({dev}).\n\nContinue?",
     "dlg.zipfolder.body": "Folder '{name}' will be packed into a ZIP file on drive {l}:.\n"
                           "Continue?",
     "dlg.ext4.title": "Not Supported",
@@ -310,6 +322,7 @@ EN = {
     "ui.console_saved": "Console saved: {p}",
     "ui.console_error": "Could not save console: {e}",
     "ui.cancel_req": "Cancel requested...",
+    "ui.cancelled": "Operation cancelled by the user.",
     "ui.reports_open": "Reports folder: {p}",
     "mon.added": "Device plugged in → {d}  [{f}]",
     "mon.removed": "Device removed → {l}:",
@@ -319,6 +332,8 @@ EN = {
     "fmt.bad_fs": "Unsupported file system: {fs}",
     "fmt.fat32_warn": "Windows cannot create FAT32 on drives larger than 32 GB; the "
                       "operation may fail. exFAT is recommended.",
+    "fmt.fat32_block": "STOPPED: FAT32 cannot be created on a {s} drive (Windows "
+                       "32 GB limit). The disk was NOT erased — choose exFAT or NTFS.",
     "fmt.start": "Formatting ({mode}) → {l}:  [{fs}]",
     "fmt.ok": "{l}: formatted → {fs}",
     "fmt.ok_l": '{l}: formatted → {fs}  label="{ad}"',
@@ -346,6 +361,8 @@ EN = {
     "copy.cancelled": "Copy cancelled.",
     "copy.partial_removed": "Copy cancelled; partial file deleted.",
     "copy.file_error": "  {rel} → {e}",
+    "copy.file_log_skipped": "Per-file logging disabled for {n} files to keep the UI "
+                             "responsive (see the summary line below).",
     "copy.done": "Copy finished: {c} copied, {s} skipped, {e} errors · "
                  "{w} / {t} sec ({sp} MB/s)",
     "copy.progress": "Copying %{p}",

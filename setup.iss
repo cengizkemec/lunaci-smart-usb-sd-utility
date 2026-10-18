@@ -2,7 +2,7 @@
 ; Derlemek için: ISCC.exe setup.iss
 
 #define MyAppName "Lunaci Smart USB & SD Card Utility"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "1.2.0"
 #define MyAppPublisher "Cengiz Kemeç"
 #define MyAppURL "https://cengizkemec.com.tr/"
 #define MyAppExeName "LunaciSmartUSBCardUtility.exe"
@@ -30,9 +30,16 @@ UninstallDisplayIcon={app}\{#MyAppExeName}
 Name: "turkish"; MessagesFile: "compiler:Languages\Turkish.isl"
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
+[CustomMessages]
+turkish.CreateDesktopIcon=Masaüstü kısayolu oluştur
+english.CreateDesktopIcon=Create a desktop shortcut
+turkish.AdditionalIcons=Ek kısayollar:
+english.AdditionalIcons=Additional icons:
+turkish.LaunchApp=Uygulamayı başlat
+english.LaunchApp=Launch the application
+
 [Tasks]
-Name: "desktopicon"; Description: "Masaüstü kısayolu oluştur"; GroupDescription: "Ek kısayollar:"
-Name: "quicklaunchicon"; Description: "Hızlı başlat çubuğuna ekle"; GroupDescription: "Ek kısayollar:"; Flags: unchecked
+Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
 
 [Files]
 Source: "dist\LunaciSmartUSBCardUtility.exe"; DestDir: "{app}"; Flags: ignoreversion
@@ -44,7 +51,6 @@ Name: "{app}\reports"
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
-Name: "{userappdata}\Microsoft\Internet Explorer\Quick Launch\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: quicklaunchicon
 
 [Run]
-Filename: "{app}\{#MyAppExeName}"; Description: "{#MyAppName} uygulamasını başlat"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchApp}"; Flags: nowait postinstall skipifsilent

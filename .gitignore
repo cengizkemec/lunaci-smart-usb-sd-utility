@@ -3,3 +3,6 @@ build/
 __pycache__/
 *.pyc
 error.log
+config.json
+config.json.tmp
+reports/

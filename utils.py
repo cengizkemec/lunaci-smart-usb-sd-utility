@@ -4,15 +4,21 @@ from __future__ import annotations
 import ctypes
 import locale
 import os
+import re
 import subprocess
 import sys
 import tempfile
 import threading
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Callable, List, Optional, Sequence, Tuple, Union
 
 CREATE_NO_WINDOW = 0x08000000
+
+# Satir sonu ayirici (tek seferde, bayt bayt dongu yerine)
+_EOL_RE = re.compile(rb"[\r\n]+")
+_MAX_STORED_LINES = 20000
 
 LEVEL_COLORS = {
     "DEBUG": "#8b949e",
@@ -59,8 +65,8 @@ class Emitter:
         rec = LogRecord(datetime.now(), level, str(message), self.task)
         with self._lock:
             self.capture.append(rec.line)
-            if len(self.capture) > 2000:
-                del self.capture[:1000]
+            if len(self.capture) > 20000:
+                del self.capture[:10000]
         try:
             self._put(("log", rec))
         except Exception:
@@ -145,14 +151,40 @@ def _decode(data: bytes) -> str:
 
 # ------------------------------------------------------ süreç çalıştırma ----
 
+def _kill_tree(proc) -> None:
+    """Prosesi VE alt proseslerini (ping/chkdsk vb.) zorla sonlandirir.
+
+    ``proc.kill()`` yalnizca dogrudan baslatilan prosesi (cmd.exe) oldurur;
+    onun baslattigi cocuk prosesler stdout borusunu acik tutmaya devam eder ve
+    ``read()`` asili kalir. taskkill /T tum agaci kapatir.
+    """
+    pid = getattr(proc, "pid", None)
+    if pid:
+        try:
+            subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                           creationflags=CREATE_NO_WINDOW, timeout=10)
+        except Exception:
+            pass
+    try:
+        proc.kill()
+    except Exception:
+        pass
+
+
 def run_process(
     cmd: Command,
     *,
     on_line: Optional[Callable[[str], None]] = None,
     cwd: Optional[str] = None,
     timeout: Optional[float] = None,
+    cancel: Optional[threading.Event] = None,
 ) -> Tuple[int, List[str]]:
-    """Komutu gizli pencerede çalıştırır; hem \\n hem \\r ayracıyla satır akışı sağlar."""
+    """Komutu gizli pencerede çalıştırır; hem \\n hem \\r ayracıyla satır akışı sağlar.
+
+    ``cancel`` verilirse kullanici iptal ettiginde proses oldurulur.
+    Satir ayirma bayt bayt degil, tek regexp taramasiyla yapilir (hizli).
+    """
     cmd_list: List[str] = ["cmd", "/c", cmd] if isinstance(cmd, str) else list(cmd)
     lines: List[str] = []
     proc = subprocess.Popen(
@@ -165,25 +197,30 @@ def run_process(
         bufsize=0,
     )
     killed = threading.Event()
+    stop_at = (time.monotonic() + timeout) if timeout else None
 
     def _watch() -> None:
         try:
-            proc.wait(timeout)
-        except subprocess.TimeoutExpired:
-            killed.set()
-            try:
-                proc.kill()
-            except Exception:
-                pass
+            while proc.poll() is None:
+                if cancel is not None and cancel.is_set():
+                    killed.set()
+                    _kill_tree(proc)
+                    return
+                if stop_at is not None and time.monotonic() >= stop_at:
+                    killed.set()
+                    _kill_tree(proc)
+                    return
+                time.sleep(0.1)
+        except Exception:
+            pass
 
-    if timeout:
+    if timeout or cancel is not None:
         threading.Thread(target=_watch, daemon=True).start()
 
-    def _flush(buf: bytearray) -> None:
-        if not buf:
+    def _flush(data: bytes) -> None:
+        if not data:
             return
-        text = _decode(bytes(buf))
-        buf.clear()
+        text = _decode(data)
         lines.append(text)
         if on_line:
             try:
@@ -194,16 +231,20 @@ def run_process(
     buf = bytearray()
     try:
         while True:
-            chunk = proc.stdout.read(4096)
+            chunk = proc.stdout.read(65536)
             if not chunk:
                 break
-            for b in chunk:
-                if b in (10, 13):
-                    _flush(buf)
-                else:
-                    buf.append(b)
+            buf.extend(chunk)
+            # tek taramada tam satirlari ayikla
+            view = bytes(buf)
+            start = 0
+            for m in _EOL_RE.finditer(view):
+                _flush(view[start:m.start()])
+                start = m.end()
+            if start:
+                del buf[:start]
     finally:
-        _flush(buf)
+        _flush(bytes(buf))
         try:
             proc.stdout.close()
         except Exception:
@@ -211,23 +252,25 @@ def run_process(
         try:
             proc.wait(10)
         except Exception:
-            try:
-                proc.kill()
-            except Exception:
-                pass
+            _kill_tree(proc)
+    if len(lines) > _MAX_STORED_LINES:
+        del lines[:len(lines) - _MAX_STORED_LINES]
     rc = proc.returncode if proc.returncode is not None else -1
     return (-1 if killed.is_set() else rc), lines
 
 
 def run_shell(cmd: str, on_line: Optional[Callable[[str], None]] = None,
-              timeout: Optional[float] = None) -> Tuple[int, List[str]]:
+              timeout: Optional[float] = None,
+              cancel: Optional[threading.Event] = None) -> Tuple[int, List[str]]:
     """cmd.exe içinde, UTF-8 konsol kod sayfasıyla çalıştırır."""
-    return run_process(f"chcp 65001>nul & {cmd}", on_line=on_line, timeout=timeout)
+    return run_process(f"chcp 65001>nul & {cmd}", on_line=on_line,
+                       timeout=timeout, cancel=cancel)
 
 
 def run_diskpart(script_lines: Sequence[str],
                  on_line: Optional[Callable[[str], None]] = None,
-                 timeout: Optional[float] = None) -> Tuple[int, List[str]]:
+                 timeout: Optional[float] = None,
+                 cancel: Optional[threading.Event] = None) -> Tuple[int, List[str]]:
     """diskpart'a satırları dosya üzerinden verir; satırları canlı iletir."""
     fd, path = tempfile.mkstemp(prefix="lunaci_dp_", suffix=".txt")
     try:
@@ -235,7 +278,8 @@ def run_diskpart(script_lines: Sequence[str],
         with os.fdopen(fd, "w", encoding=enc, errors="replace", newline="\r\n") as f:
             for line in script_lines:
                 f.write(line + "\n")
-        return run_process(["diskpart", "/s", path], on_line=on_line, timeout=timeout)
+        return run_process(["diskpart", "/s", path], on_line=on_line,
+                           timeout=timeout, cancel=cancel)
     finally:
         try:
             os.remove(path)

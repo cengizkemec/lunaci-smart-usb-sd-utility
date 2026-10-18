@@ -11,8 +11,13 @@ from typing import Callable, List, Optional, Tuple
 from i18n import tr
 from utils import human_bytes, run_diskpart, run_process, run_shell
 
-CHUNK = 1024 * 1024
+MB = 1024 * 1024
+CHUNK = 4 * MB          # buyuk tampon = daha az sistem cagrisi = daha hizli
 ProgressCb = Optional[Callable[[float, Optional[str]], None]]
+
+# Cok dosyali klasorlerde satir basina log basmak arayuzu bogar; esik uzerinde
+# ozet satiri uretilir (rapor yine de tum dosyalari tutar).
+_FILELOG_LIMIT = 200
 
 # Windows çekirdek API'leri (ham disk yazımı için)
 _k32 = ctypes.windll.kernel32
@@ -81,6 +86,7 @@ def copy_folder(src: str, letter: str, logger, cancel,
 
 def _shutil_copy(src, dst, logger, cancel, progress: ProgressCb) -> bool:
     files, total = _walk_files(src)
+    verbose = len(files) <= _FILELOG_LIMIT
     logger.info(tr("copy.start", n=len(files), s=human_bytes(total), d=dst))
     copied = skipped = errors = written = done_bytes = 0
     started = time.time()
@@ -97,7 +103,7 @@ def _shutil_copy(src, dst, logger, cancel, progress: ProgressCb) -> bool:
             return
         last_emit = now
         pct = int(done_bytes * 100 / total) if total else 100
-        speed = (done_bytes / max(now - started, 1e-6)) / CHUNK  # MB/s
+        speed = (done_bytes / max(now - started, 1e-6)) / MB  # MB/s
         progress(float(pct), tr("copy.progress_speed", p=pct, sp=f"{speed:.1f}"))
 
     for path, st in files:
@@ -137,7 +143,8 @@ def _shutil_copy(src, dst, logger, cancel, progress: ProgressCb) -> bool:
                 except OSError:
                     pass
             copied += 1
-            logger.info(f"  {rel}  ({human_bytes(st.st_size if st else 0)})")
+            if verbose:
+                logger.info(f"  {rel}  ({human_bytes(st.st_size if st else 0)})")
         except OSError as exc:
             errors += 1
             logger.error(tr("copy.file_error", rel=rel, e=exc))
@@ -148,9 +155,11 @@ def _shutil_copy(src, dst, logger, cancel, progress: ProgressCb) -> bool:
             emit_progress(force=True)
 
     elapsed = max(time.time() - started, 1e-6)
+    if not verbose:
+        logger.info(tr("copy.file_log_skipped", n=len(files)))
     logger.ok(tr("copy.done", c=copied, s=skipped, e=errors,
                  w=human_bytes(written), t=f"{elapsed:.1f}",
-                 sp=f"{written / elapsed / CHUNK:.1f}"))
+                 sp=f"{written / elapsed / MB:.1f}"))
     if progress:
         progress(100.0, tr("copy.progress", p=100))
     return errors == 0
@@ -216,6 +225,7 @@ def write_iso_raw(iso_path: str, letter: str, logger, cancel,
     written = 0
     started = time.time()
     ok = True
+    last_emit = 0.0
     try:
         with open(iso_path, "rb") as img:
             while True:
@@ -232,24 +242,30 @@ def write_iso_raw(iso_path: str, letter: str, logger, cancel,
                     ok = False
                     break
                 written += done.value
-                if progress and written % (CHUNK * 16) < CHUNK:
-                    pct = written * 100.0 / size
-                    progress(pct, tr("copy.progress", p=f"{pct:.0f}"))
+                if progress:
+                    now = time.time()
+                    if now - last_emit >= 0.25:
+                        last_emit = now
+                        pct = written * 100.0 / size
+                        sp = (written / max(now - started, 1e-6)) / MB
+                        progress(pct, tr("copy.progress_speed", p=f"{pct:.0f}",
+                                         sp=f"{sp:.1f}"))
         if ok:
             if not _FlushFileBuffers(handle):
                 logger.warn(f"Önbellek boşaltılamadı: {ctypes.WinError()}")
             elapsed = max(time.time() - started, 1e-6)
             logger.ok(tr("iso.done", w=human_bytes(written), s=human_bytes(size),
                          t=f"{elapsed:.1f}",
-                         sp=f"{written / elapsed / CHUNK:.1f}"))
+                         sp=f"{written / elapsed / MB:.1f}"))
     finally:
         _CloseHandle(handle)
 
-    run_diskpart(["rescan"], on_line=logger.cmd)
+    run_diskpart(["rescan"], on_line=logger.cmd, timeout=60)
     logger.info(tr("iso.rescan"))
     if ok and progress:
-        progress(100.0, tr("iso.done", w=human_bytes(written), s=human_bytes(size),
-                           t="0", sp="0"))
+        elapsed = max(time.time() - started, 1e-6)
+        progress(100.0, tr("copy.progress_speed", p=100,
+                           sp=f"{written / elapsed / MB:.1f}"))
     return ok
 
 
@@ -265,6 +281,7 @@ def zip_folder_to_device(src: str, letter: str, logger, cancel,
     name = os.path.basename(src.rstrip("\\/")) or "klasor"
     out = os.path.join(f"{letter}:", f"{name}.zip")
     files, total = _walk_files(src)
+    verbose = len(files) <= _FILELOG_LIMIT
     logger.info(tr("zip.folder_start", n=len(files), s=human_bytes(total), d=out))
     started = time.time()
     packed = errors = done = 0
@@ -282,7 +299,8 @@ def zip_folder_to_device(src: str, letter: str, logger, cancel,
                 try:
                     zf.write(path, rel.replace("\\", "/"))
                     packed += 1
-                    logger.info(f"  + {rel}  ({human_bytes(st.st_size if st else 0)})")
+                    if verbose:
+                        logger.info(f"  + {rel}  ({human_bytes(st.st_size if st else 0)})")
                 except Exception as exc:
                     errors += 1
                     logger.error(tr("zip.folder_error", rel=rel, e=exc))
@@ -311,6 +329,8 @@ def zip_folder_to_device(src: str, letter: str, logger, cancel,
     out_size = os.path.getsize(out)
     elapsed = max(time.time() - started, 1e-6)
     ratio = (100.0 * (1 - out_size / total)) if total else 0.0
+    if not verbose:
+        logger.info(tr("copy.file_log_skipped", n=len(files)))
     logger.ok(tr("zip.folder_done", d=out, s=human_bytes(out_size), r=f"{ratio:.0f}",
                  n=packed, e=errors, t=f"{elapsed:.1f}"))
     if progress:
@@ -330,6 +350,7 @@ def write_zip_to_device(zip_path: str, letter: str, logger, cancel,
     try:
         with zipfile.ZipFile(zip_path) as zf:
             infos = [i for i in zf.infolist() if not i.is_dir()]
+            verbose = len(infos) <= _FILELOG_LIMIT
             total = sum(i.file_size for i in infos) or 1
             logger.info(tr("zip.extract_count", n=len(infos), s=human_bytes(total)))
             written = errors = 0
@@ -354,7 +375,8 @@ def write_zip_to_device(zip_path: str, letter: str, logger, cancel,
                                 break
                             outf.write(block)
                             written += len(block)
-                    logger.info(f"  {info.filename}  ({human_bytes(info.file_size)})")
+                    if verbose:
+                        logger.info(f"  {info.filename}  ({human_bytes(info.file_size)})")
                 except Exception as exc:
                     errors += 1
                     logger.error(tr("zip.extract_error", name=info.filename, e=exc))
@@ -368,6 +390,8 @@ def write_zip_to_device(zip_path: str, letter: str, logger, cancel,
         logger.error(tr("zip.read_error", e=exc))
         return False
 
+    if not verbose:
+        logger.info(tr("copy.file_log_skipped", n=len(infos)))
     if errors:
         logger.warn(tr("zip.extract_warn", e=errors))
     else:

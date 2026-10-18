@@ -6,6 +6,7 @@ için uygulama başlangıcında UAC ile yükseltilir.
 import ctypes
 import os
 import sys
+import tempfile
 import tkinter as tk
 import tkinter.messagebox as messagebox
 
@@ -64,17 +65,56 @@ def _ensure_admin() -> None:
             "yazma işlemleri çalışmayacaktır.")
 
 
+def _load_theme() -> None:
+    """Telegram esintili varsayilan renk temasi (assets/theme_lunaci.json)."""
+    import customtkinter as ctk
+    try:
+        from config_manager import resource_path
+        path = resource_path(os.path.join("assets", "theme_lunaci.json"))
+        if os.path.isfile(path):
+            ctk.set_default_color_theme(path)
+            return
+    except Exception:
+        pass
+    ctk.set_default_color_theme("blue")
+
+
+def _smoke_seconds() -> int:
+    """Tanilama: LUNACI_SMOKE_TEST=<saniye> ayarliysa yonetici istemeden kisa
+    bir GUI oturumu calistirilir (paketin eksiksiz kuruldugunu dogrulamak icin).
+    Normal kullanimda bu ortam degiskeni tanimli olmadigindan hicbir etkisi yoktur.
+    """
+    try:
+        raw = os.environ.get("LUNACI_SMOKE_TEST", "").strip()
+        return max(1, min(int(raw), 120)) if raw else 0
+    except Exception:
+        return 0
+
+
 def main() -> None:
     _install_excepthook()
     _dpi_aware()
+    smoke = _smoke_seconds()
+    if smoke:
+        marker = os.path.join(tempfile.gettempdir(), "lunaci_smoke_ok.txt")
+        try:
+            os.remove(marker)
+        except OSError:
+            pass
+        _load_theme()
+        from app import LunaciApp
+        app = LunaciApp()
+        app.after(smoke * 1000, app.destroy)
+        app.mainloop()
+        with open(marker, "w", encoding="utf-8") as f:
+            f.write("ok\n")
+        return
     _ensure_admin()
-    import customtkinter as ctk
-    ctk.set_default_color_theme("blue")
+    _load_theme()
     from app import LunaciApp
     app = LunaciApp()
     # Pencere/taskbar ikonu (paket içi assets/logo.ico)
     try:
-        import os
         from config_manager import resource_path
         icon_path = resource_path("assets/logo.ico")
         if os.path.isfile(icon_path):

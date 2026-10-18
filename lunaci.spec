@@ -16,6 +16,7 @@ a = Analysis(
     datas=[
         (os.path.join(ROOT, "assets", "logo.ico"), "assets"),
         (os.path.join(ROOT, "assets", "logo.jpg"), "assets"),
+        (os.path.join(ROOT, "assets", "theme_lunaci.json"), "assets"),
     ],
     hiddenimports=["psutil"],
     hookspath=[],

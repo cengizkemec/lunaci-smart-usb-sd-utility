@@ -20,10 +20,23 @@ from disk_manager import (Device, DeviceMonitor, fstype_to_option, run_format,
 from file_ops import (copy_folder, save_report, write_iso_raw,
                       write_zip_to_device, zip_folder_to_device)
 from health import CRIT, GOOD, WARN, run_health_test
-from utils import Emitter, human_bytes, is_admin
+from utils import LEVEL_COLORS, Emitter, human_bytes, is_admin
 
 THEME_TO_MODE = {"system": "System", "dark": "Dark", "light": "Light"}
 THEME_KEYS = ("system", "dark", "light")
+
+# Telegram esintili yardimci renkler — (acik, koyu) ciftleri seklinde verilir,
+# boylece koyu/aci temalari arasinda geciste otomatik uyum saglanir.
+MUTED = ("#707579", "#6D7F8F")          # soluk/bilgi metinleri
+LINK = ("#0F87D4", "#52A9F2")           # baglanti metinleri
+SEC_BTN = ("#E7EBF0", "#2B5278")        # ikincil buton
+SEC_BTN_H = ("#D5DBE0", "#3A6594")
+SEC_BTN_T = ("#17212B", "#E9EDF2")
+DANGER_BTN = ("#E57373", "#8B1E1E")     # tehlikeli buton
+DANGER_BTN_H = ("#E53935", "#A62727")
+CANCEL_BTN = ("#E57373", "#B91C1C")     # iptal butonu
+CANCEL_BTN_H = ("#E53935", "#991B1B")
+WHITE = ("#FFFFFF", "#FFFFFF")
 
 LED_COLORS = {"unknown": "#6b7280", GOOD: "#22c55e", WARN: "#eab308", CRIT: "#ef4444"}
 HEALTH_KEY = {"unknown": "health.unknown", GOOD: "health.good",
@@ -52,9 +65,20 @@ class LunaciApp(ctk.CTk):
         self._log_lines = 0
         self._indeterminate = False
         self._about = None
+        # performans/onluklar: degismedikce Tk widget'larina dokunulmaz
+        self._menu_values: list = []
+        self._menu_current: str = ""
+        self._target_cache: tuple = (None, False, 0.0)
+        self._target_checking = False
 
         ctk.set_appearance_mode(THEME_TO_MODE.get(self.cfg.get("theme"), "System"))
-        ctk.set_default_color_theme("blue")
+        # Telegram esintili varsayilan tema (assets/theme_lunaci.json)
+        try:
+            _theme_path = resource_path(os.path.join("assets", "theme_lunaci.json"))
+            if os.path.isfile(_theme_path):
+                ctk.set_default_color_theme(_theme_path)
+        except Exception:
+            pass
 
         self.title(APP_NAME)
         self.geometry("1120x880")
@@ -76,6 +100,8 @@ class LunaciApp(ctk.CTk):
 
         self.after(100, self._poll)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
+        # Beklenmedik Tk geri cagrisi hatalarini sessizce yutma, error.log'a yaz.
+        self.report_callback_exception = lambda *a: self._report_callback_error(a[1])
 
     # ----------------------------------------------------------- yardımcı --
 
@@ -106,7 +132,7 @@ class LunaciApp(ctk.CTk):
         ctk.CTkLabel(header, text=APP_NAME,
                      font=self.font_title).grid(row=0, column=0, sticky="w")
         self.subtitle_label = ctk.CTkLabel(
-            header, text=tr("app.subtitle"), text_color="gray", font=self.font_small)
+            header, text=tr("app.subtitle"), text_color=MUTED, font=self.font_small)
         self.subtitle_label.grid(row=1, column=0, sticky="w")
         admin = is_admin()
         self.admin_badge = ctk.CTkLabel(
@@ -123,7 +149,8 @@ class LunaciApp(ctk.CTk):
             font=self.font_small, width=90)
         self.lang_menu.grid(row=0, column=3, rowspan=2, padx=(0, 8))
         self.btn_about = ctk.CTkButton(header, text=tr("btn.about"), width=90,
-                                       fg_color="#334155", hover_color="#1e293b",
+                                       fg_color=SEC_BTN, hover_color=SEC_BTN_H,
+                                       text_color=SEC_BTN_T,
                                        command=self._show_about)
         self.btn_about.grid(row=0, column=4, rowspan=2)
 
@@ -132,7 +159,7 @@ class LunaciApp(ctk.CTk):
         dev_frame.grid(row=1, column=0, sticky="nsew", padx=(18, 6), pady=6)
         dev_frame.grid_columnconfigure(1, weight=1)
         self.dev_section = ctk.CTkLabel(dev_frame, text=tr("dev.section"),
-                                        font=self.font_small, text_color="gray")
+                                        font=self.font_small, text_color=MUTED)
         self.dev_section.grid(row=0, column=0, sticky="w", padx=12, pady=(10, 2))
         self.device_menu = ctk.CTkOptionMenu(dev_frame, width=340,
                                              command=self._on_device_pick)
@@ -142,7 +169,7 @@ class LunaciApp(ctk.CTk):
                                 font=ctk.CTkFont(size=26))
         self.led.grid(row=0, column=3, rowspan=2, padx=(6, 12), pady=(8, 0))
         self.health_label = ctk.CTkLabel(dev_frame, text=tr("health.status", s="—"),
-                                         font=self.font_small, text_color="gray")
+                                         font=self.font_small, text_color=MUTED)
         self.health_label.grid(row=1, column=0, columnspan=3, sticky="w", padx=12)
         self.info_label = ctk.CTkLabel(dev_frame, text=tr("dev.waiting"),
                                        font=self.font_ui, anchor="w", justify="left")
@@ -151,10 +178,10 @@ class LunaciApp(ctk.CTk):
         self.cap_bar.set(0)
         self.cap_bar.grid(row=3, column=0, columnspan=3, sticky="ew", padx=12, pady=(4, 2))
         self.cap_label = ctk.CTkLabel(dev_frame, text="", font=self.font_small,
-                                      text_color="gray")
+                                      text_color=MUTED)
         self.cap_label.grid(row=4, column=0, columnspan=3, sticky="w", padx=12)
         self.tech_label = ctk.CTkLabel(dev_frame, text="", font=self.font_small,
-                                       text_color="gray")
+                                       text_color=MUTED)
         self.tech_label.grid(row=5, column=0, columnspan=3, sticky="w", padx=12, pady=(0, 6))
         self.btn_health = ctk.CTkButton(dev_frame, text=tr("btn.health"),
                                         command=lambda: self._do_health())
@@ -165,7 +192,7 @@ class LunaciApp(ctk.CTk):
         tgt_frame.grid(row=1, column=1, sticky="nsew", padx=(6, 18), pady=6)
         tgt_frame.grid_columnconfigure(0, weight=1)
         self.folder_section = ctk.CTkLabel(tgt_frame, text=tr("folder.section"),
-                                           font=self.font_small, text_color="gray")
+                                           font=self.font_small, text_color=MUTED)
         self.folder_section.grid(row=0, column=0, sticky="w", padx=12, pady=(10, 2))
         row = ctk.CTkFrame(tgt_frame, fg_color="transparent")
         row.grid(row=1, column=0, sticky="ew", padx=12)
@@ -182,7 +209,8 @@ class LunaciApp(ctk.CTk):
                                       command=self._do_copy)
         self.btn_copy.grid(row=2, column=0, sticky="ew", padx=12, pady=(8, 2))
         self.btn_zipfolder = ctk.CTkButton(tgt_frame, text=tr("btn.zip_folder"),
-                                           fg_color="#334155", hover_color="#1e293b",
+                                           fg_color=SEC_BTN, hover_color=SEC_BTN_H,
+                                           text_color=SEC_BTN_T,
                                            command=self._do_zipfolder)
         self.btn_zipfolder.grid(row=3, column=0, sticky="ew", padx=12, pady=(2, 4))
         self.autofmt_switch = ctk.CTkSwitch(
@@ -201,8 +229,9 @@ class LunaciApp(ctk.CTk):
             self.reports_switch.select()
         self.reports_switch.grid(row=0, column=0, sticky="w")
         self.btn_reports = ctk.CTkButton(reports_row, text=tr("btn.reports"),
-                                         width=150, fg_color="#334155",
-                                         hover_color="#1e293b",
+                                         width=150, fg_color=SEC_BTN,
+                                         hover_color=SEC_BTN_H,
+                                         text_color=SEC_BTN_T,
                                          command=self._open_reports)
         self.btn_reports.grid(row=0, column=1, sticky="e")
 
@@ -211,14 +240,14 @@ class LunaciApp(ctk.CTk):
         fmt_frame.grid(row=2, column=0, sticky="nsew", padx=(18, 6), pady=6)
         fmt_frame.grid_columnconfigure(1, weight=1)
         self.fmt_section = ctk.CTkLabel(fmt_frame, text=tr("fmt.section"),
-                                        font=self.font_small, text_color="gray")
+                                        font=self.font_small, text_color=MUTED)
         self.fmt_section.grid(row=0, column=0, sticky="w", padx=12, pady=(10, 2))
         self.fs_var = tk.StringVar(value="FAT32")
         self.fs_box = ctk.CTkComboBox(fmt_frame, values=FS_OPTIONS, state="readonly",
                                       variable=self.fs_var, width=180)
         self.fs_box.grid(row=0, column=1, sticky="w", padx=6)
         self.label_caption = ctk.CTkLabel(fmt_frame, text=tr("fmt.label"),
-                                          font=self.font_small, text_color="gray")
+                                          font=self.font_small, text_color=MUTED)
         self.label_caption.grid(row=0, column=2, sticky="w", padx=12)
         self.label_var = tk.StringVar(value=self.cfg.get("volume_label") or "LUNACI")
         ctk.CTkEntry(fmt_frame, textvariable=self.label_var, width=160).grid(
@@ -228,12 +257,13 @@ class LunaciApp(ctk.CTk):
         self.btn_quick.grid(row=1, column=0, columnspan=2, sticky="ew",
                             padx=12, pady=(8, 2))
         self.btn_full = ctk.CTkButton(fmt_frame, text=tr("btn.full_format"),
-                                      fg_color="#334155", hover_color="#1e293b",
+                                      fg_color=SEC_BTN, hover_color=SEC_BTN_H,
+                                      text_color=SEC_BTN_T,
                                       command=lambda: self._do_format(False))
         self.btn_full.grid(row=1, column=2, columnspan=2, sticky="ew",
                            padx=12, pady=(8, 2))
         self.fmt_hint = ctk.CTkLabel(fmt_frame, text=tr("fmt.hint"),
-                                     font=self.font_small, text_color="gray")
+                                     font=self.font_small, text_color=MUTED)
         self.fmt_hint.grid(row=2, column=0, columnspan=4, sticky="w", padx=12,
                            pady=(2, 10))
 
@@ -242,23 +272,25 @@ class LunaciApp(ctk.CTk):
         tools_frame.grid(row=2, column=1, sticky="nsew", padx=(6, 18), pady=6)
         tools_frame.grid_columnconfigure((0, 1), weight=1)
         self.tools_section = ctk.CTkLabel(tools_frame, text=tr("tools.section"),
-                                          font=self.font_small, text_color="gray")
+                                          font=self.font_small, text_color=MUTED)
         self.tools_section.grid(row=0, column=0, columnspan=2, sticky="w",
                                 padx=12, pady=(10, 2))
         self.btn_iso = ctk.CTkButton(tools_frame, text=tr("btn.iso"),
                                      command=self._do_iso)
         self.btn_iso.grid(row=1, column=0, sticky="ew", padx=(12, 3), pady=(6, 2))
         self.btn_zip = ctk.CTkButton(tools_frame, text=tr("btn.zip"),
-                                     fg_color="#334155", hover_color="#1e293b",
+                                     fg_color=SEC_BTN, hover_color=SEC_BTN_H,
+                                     text_color=SEC_BTN_T,
                                      command=self._do_zip)
         self.btn_zip.grid(row=1, column=1, sticky="ew", padx=(3, 12), pady=(6, 2))
         self.btn_repair = ctk.CTkButton(tools_frame, text=tr("btn.repair"),
-                                        fg_color="#7f1d1d", hover_color="#6b1414",
+                                        fg_color=DANGER_BTN, hover_color=DANGER_BTN_H,
+                                        text_color=WHITE,
                                         command=self._do_repair)
         self.btn_repair.grid(row=2, column=0, columnspan=2, sticky="ew",
                              padx=12, pady=(2, 4))
         self.tools_hint = ctk.CTkLabel(tools_frame, text=tr("tools.hint"),
-                                       font=self.font_small, text_color="gray",
+                                       font=self.font_small, text_color=MUTED,
                                        justify="left")
         self.tools_hint.grid(row=3, column=0, columnspan=2, sticky="w", padx=12,
                              pady=(2, 10))
@@ -270,14 +302,16 @@ class LunaciApp(ctk.CTk):
         log_frame.grid_columnconfigure(0, weight=1)
         log_frame.grid_rowconfigure(1, weight=1)
         self.log_section = ctk.CTkLabel(log_frame, text=tr("log.section"),
-                                        font=self.font_small, text_color="gray")
+                                        font=self.font_small, text_color=MUTED)
         self.log_section.grid(row=0, column=0, sticky="w", padx=12, pady=(8, 2))
         self.btn_clear = ctk.CTkButton(log_frame, text=tr("btn.clear"), width=80,
-                                       fg_color="#334155", hover_color="#1e293b",
+                                       fg_color=SEC_BTN, hover_color=SEC_BTN_H,
+                                       text_color=SEC_BTN_T,
                                        command=self._clear_log)
         self.btn_clear.grid(row=0, column=1, padx=(4, 6))
         self.btn_save_log = ctk.CTkButton(log_frame, text=tr("btn.save"), width=80,
-                                          fg_color="#334155", hover_color="#1e293b",
+                                          fg_color=SEC_BTN, hover_color=SEC_BTN_H,
+                                          text_color=SEC_BTN_T,
                                           command=self._save_console)
         self.btn_save_log.grid(row=0, column=2, padx=(0, 12))
         self.log_box = ctk.CTkTextbox(log_frame, font=self.font_mono, wrap="word")
@@ -295,7 +329,8 @@ class LunaciApp(ctk.CTk):
         self.prog.set(0)
         self.prog.grid(row=0, column=1, sticky="ew", padx=10)
         self.cancel_btn = ctk.CTkButton(status, text=tr("btn.cancel"), width=90,
-                                        fg_color="#b91c1c", hover_color="#991b1b",
+                                        fg_color=CANCEL_BTN, hover_color=CANCEL_BTN_H,
+                                        text_color=WHITE,
                                         state="disabled", command=self._cancel_task)
         self.cancel_btn.grid(row=0, column=2)
 
@@ -340,6 +375,8 @@ class LunaciApp(ctk.CTk):
         self.cancel_btn.configure(text=tr("btn.cancel"))
         if not self.busy:
             self.status_label.configure(text=tr("status.ready"))
+        self._menu_values = []          # dil degisince cihaz menusu yeniden kurulur
+        self._menu_current = ""
         self._update_device_card()
 
     # --------------------------------------------------------- durum UI -----
@@ -350,11 +387,47 @@ class LunaciApp(ctk.CTk):
                 return dev
         return None
 
+    def _target_exists(self) -> bool:
+        """Hedef klasor gecerliligi.
+
+        Dosya sistemi sorgusu (``os.path.isdir``) ana thread'de ASLA yapilmaz:
+        hedef klasor OneDrive/ag uzerinde olabileceginden sorgu arka planda
+        calisir, sonuc kuyruk uzerinden ``_on_target_ok`` ile geri gelir.
+        Buradan yalnizca onbellekteki sonuc dondurulur.
+        """
+        target = (self.target_var.get() or "").strip()
+        cached_target, cached_ok, cached_at = self._target_cache
+        if cached_target == target and (time.time() - cached_at) < 5.0:
+            return cached_ok
+        if not self._target_checking:
+            self._target_checking = True
+
+            def _probe(probe_target: str = target) -> None:
+                try:
+                    found = bool(probe_target) and os.path.isdir(probe_target)
+                except OSError:
+                    found = False
+                try:
+                    self.q.put(("target_ok", probe_target, found))
+                except Exception:
+                    pass
+
+            threading.Thread(target=_probe, daemon=True,
+                             name="lunaci-target-check").start()
+        return cached_ok if cached_target == target else False
+
+    def _on_target_ok(self, target: str, ok: bool) -> None:
+        """Arka plan hedef sorgusunun sonucu (ana thread'de calisir)."""
+        self._target_checking = False
+        if (self.target_var.get() or "").strip() != target:
+            return
+        self._target_cache = (target, ok, time.time())
+        self._refresh_actions()
+
     def _refresh_actions(self) -> None:
         has_dev = self.active_device() is not None
         busy = self.busy is not None
-        target = (self.target_var.get() or "").strip()
-        has_target = bool(target) and os.path.isdir(target)
+        has_target = self._target_exists()
 
         def st(ok: bool) -> str:
             return "normal" if (ok and has_dev and not busy) else "disabled"
@@ -418,25 +491,54 @@ class LunaciApp(ctk.CTk):
     # --------------------------------------------------------- olaylar ------
 
     def _poll(self) -> None:
+        """Kuyrugu bosaltir. Hangi olay gelirse gelsin DONMAZ: tum dongu
+        try/except ile korunur ve ``after`` her durumda yeniden kurulur.
+        Log kayitlari tek tek degil, TEK seferde toplu yazilir (UI tikanmaz)."""
+        logs = []
         try:
-            for _ in range(400):
-                kind, *payload = self.q.get_nowait()
-                if kind == "log":
-                    self._insert_log(payload[0])
-                elif kind == "devices":
-                    self._on_devices(payload[0])
-                elif kind == "health":
-                    letter, status, info = payload
-                    self.health[letter] = (status, info)
-                    if letter == self.active_letter:
-                        self._update_health_ui(letter)
-                elif kind == "progress":
-                    self._on_progress(payload[0], payload[1] if len(payload) > 1 else None)
-                elif kind == "task_done":
-                    self._on_task_done(*payload)
-        except queue.Empty:
+            for _ in range(2000):
+                try:
+                    kind, *payload = self.q.get_nowait()
+                except queue.Empty:
+                    break
+                try:
+                    if kind == "log":
+                        logs.append(payload[0])
+                    elif kind == "devices":
+                        self._on_devices(payload[0])
+                    elif kind == "health":
+                        letter, status, info = payload
+                        self.health[letter] = (status, info)
+                        if letter == self.active_letter:
+                            self._update_health_ui(letter)
+                    elif kind == "progress":
+                        self._on_progress(payload[0],
+                                          payload[1] if len(payload) > 1 else None)
+                    elif kind == "target_ok":
+                        self._on_target_ok(payload[0], payload[1])
+                    elif kind == "task_done":
+                        self._on_task_done(*payload)
+                except Exception as exc:
+                    self._report_callback_error(exc)
+            if logs:
+                self._insert_logs(logs)
+        except Exception as exc:
+            self._report_callback_error(exc)
+        finally:
+            try:
+                self.after(80, self._poll)
+            except Exception:
+                pass
+
+    def _report_callback_error(self, exc: BaseException) -> None:
+        """Arayuz geri cagrisindaki hatayi yutar ama error.log'a yazar."""
+        try:
+            import traceback
+            with open(os.path.join(BASE_DIR, "error.log"), "a", encoding="utf-8") as f:
+                f.write(f"[ui-callback] {type(exc).__name__}: {exc}\n")
+                f.write(traceback.format_exc() + "\n")
+        except Exception:
             pass
-        self.after(100, self._poll)
 
     def _on_devices(self, devices: list) -> None:
         self.devices = devices
@@ -449,11 +551,18 @@ class LunaciApp(ctk.CTk):
         if devices:
             cur = next((d.display for d in devices if d.letter == self.active_letter),
                        devices[0].display)
-            self.device_menu.configure(values=[d.display for d in devices])
-            self.device_menu.set(cur)
+            values = [d.display for d in devices]
         else:
-            self.device_menu.configure(values=[tr("dev.empty")])
-            self.device_menu.set(tr("dev.empty"))
+            cur = tr("dev.empty")
+            values = [tr("dev.empty")]
+        # Menu yalnizca gerçekten degistiysa yeniden kurulur (her 3 sn'de
+        # yeniden olusturmak gereksiz CPU/çizim yükü yapiyordu).
+        if values != self._menu_values:
+            self._menu_values = values
+            self.device_menu.configure(values=values)
+        if cur != self._menu_current:
+            self._menu_current = cur
+            self.device_menu.set(cur)
         self._update_device_card()
 
         dev = self.active_device()
@@ -501,30 +610,63 @@ class LunaciApp(ctk.CTk):
         if text:
             self._set_status(text)
 
-    def _insert_log(self, rec) -> None:
-        line = f"[{rec.time_str}] [{rec.level:<5}] {rec.message}\n"
+    def _insert_logs(self, records) -> None:
+        """Bir grup log kaydini TEK seferde yazar.
+
+        Eski sürüm her satiri ayri ayri ekleyip her seferinde ``see("end")``
+        cagiriyordu; binlerce dosyada bu ana thread'i doyurup arayuzu kilitliyordu.
+        Burada ardisik ayni seviyedeki satirlar birlestirilip tek ``insert`` ile
+        yazilir ve yalnizca sonda bir kez kaydirilir.
+        """
+        total = len(records)
+        if not total:
+            return
         inner = getattr(self.log_box, "_textbox", None)
-        if inner is not None:
-            try:
-                if rec.level not in self._log_tags:
-                    inner.tag_config(rec.level, foreground=rec.color)
-                    self._log_tags.add(rec.level)
-                inner.insert("end", line, rec.level)
-            except Exception:
-                self.log_box.insert("end", line)
+        if inner is None:
+            self.log_box.insert(
+                "end", "".join(
+                    f"[{r.time_str}] [{r.level:<5}] {r.message}\n" for r in records))
         else:
-            self.log_box.insert("end", line)
-        self._log_lines += 1
-        if self._log_lines > 5000:
+            i = 0
+            while i < total:
+                level = records[i].level
+                j = i
+                parts = []
+                while j < total and records[j].level == level:
+                    r = records[j]
+                    parts.append(f"[{r.time_str}] [{r.level:<5}] {r.message}\n")
+                    j += 1
+                chunk = "".join(parts)
+                if level not in self._log_tags:
+                    try:
+                        inner.tag_config(level,
+                                         foreground=LEVEL_COLORS.get(level, "#c9d1d9"))
+                    except Exception:
+                        pass
+                    self._log_tags.add(level)
+                try:
+                    inner.insert("end", chunk, level)
+                except Exception:
+                    try:
+                        self.log_box.insert("end", chunk)
+                    except Exception:
+                        pass
+                i = j
+        self._log_lines += total
+        if self._log_lines > 6000:
             try:
-                self.log_box.delete("1.0", "1001.0")
+                self.log_box.delete("1.0", f"{self._log_lines - 5000}.0")
+                self._log_lines = 5000
             except Exception:
                 pass
-            self._log_lines -= 1000
         try:
             self.log_box.see("end")
         except Exception:
             pass
+
+    def _insert_log(self, rec) -> None:
+        """Geriye dönük uyumluluk için tek kayıt ekler."""
+        self._insert_logs([rec])
 
     def _log(self, level: str, msg: str) -> None:
         fn = getattr(self._ui_emitter, level.lower(), self._ui_emitter.info)
@@ -580,7 +722,9 @@ class LunaciApp(ctk.CTk):
                 self._fs_synced_letter = self.active_letter
             self.cfg.set("preferred_filesystem", extra)
 
-        # Raporlar her zaman programın yanındaki reports klasörüne
+        # Raporlar her zaman programın yanındaki reports klasörüne.
+        # Yazma arka planda yapilir: rapor klasoru de OneDrive içinde
+        # olabildiginden ana arayuz thread'i asla bloklanmaz.
         if ok and self.cfg.get("save_reports"):
             folder = self.reports_dir()
             ts = time.strftime("%Y%m%d_%H%M%S")
@@ -588,15 +732,21 @@ class LunaciApp(ctk.CTk):
                       f"Tarih / Date: {time.strftime('%Y-%m-%d %H:%M:%S')}\n"
                       f"Cihaz / Device: {self.active_letter or '-'}:\n"
                       f"Sonuç / Result: OK\n" + "=" * 64 + "\n")
-            try:
-                path = save_report(header + "\n".join(logger.capture) + "\n",
-                                   folder, f"{key}_{ts}.txt")
-                self._log("OK", tr("ui.report_saved", p=path))
-            except Exception as exc:
-                self._log("ERROR", tr("ui.report_error", e=exc))
+            text = header + "\n".join(logger.capture) + "\n"
+            name = f"{key}_{ts}.txt"
+
+            def _save() -> None:
+                try:
+                    path = save_report(text, folder, name)
+                    self._ui_emitter.ok(tr("ui.report_saved", p=path))
+                except Exception as exc:
+                    self._ui_emitter.error(tr("ui.report_error", e=exc))
+
+            threading.Thread(target=_save, daemon=True,
+                             name="lunaci-report").start()
 
         if ok and key in ("format", "repair", "iso", "zip", "copy", "zipfolder"):
-            self.monitor.request_poll()
+            self.monitor.request_poll(force=True)
 
     def _cancel_task(self) -> None:
         if self.busy:
@@ -612,6 +762,7 @@ class LunaciApp(ctk.CTk):
         path = filedialog.askdirectory(title=tr("pick.folder_title"))
         if path:
             self.target_var.set(path)
+            self._target_cache = (None, False, 0.0)   # hedef degisti
             self.cfg.set("target_folder", path)
             self._refresh_actions()
 
@@ -624,35 +775,46 @@ class LunaciApp(ctk.CTk):
     def autofmt_enabled(self) -> bool:
         return bool(self.autofmt_switch.get())
 
-    def _preflight_format(self, logger, dev) -> bool:
+    def _fmt_opts_snapshot(self) -> "dict | None":
+        """ANA iş parçacığında biçimlendirme seçeneklerini anlık okur.
+
+        Görev iş parçacığı asla Tk widget/variable'ına dokunmamalı: Tcl bu
+        erişimleri ana döngüye kilitler ve arayüz kalıcı donar (yaşanan hata).
+        """
+        if not self.autofmt_switch.get():
+            return None
+        return {"fs": self.fs_var.get(),
+                "label": self.label_var.get().strip() or "LUNACI"}
+
+    def _preflight_format(self, logger, dev, fmt_opts) -> bool:
         """Yazma işleminden önce açıksa hızlı biçimlendirme yapar.
 
-        * fs/label ANA iş parçacığında okunur (Tk değişkenleri arka plandan
-          güvenle okunmaz). Görev iş parçacığı yalnızca bu değerleri kullanır.
-        * Biçimlendirme sonrası diskin yeniden erişilebilir olması BEKLENİR;
-          aksi halde yazım hemen başlayınca "disk bulunamadı" hatası alınırdı.
+        ``fmt_opts`` ana iş parçacığından gelir (None = kapalı). Bu metot
+        görev iş parçacığında koşar ve Tk'ya dokunmaz. Biçimlendirme sonrası
+        diskin yeniden erişilebilir olması beklenir; aksi halde yazım hemen
+        başlayınca "disk bulunamadı" hatası alınırdı.
         """
-        if not self.autofmt_enabled():
+        if not fmt_opts:
             self._log("INFO", tr("ui.autofmt_skip"))
             return True
         if not is_admin():
             logger.error(tr("ui.admin_needed"))
             return False
-        fs = self.fs_var.get()
+        fs = fmt_opts.get("fs") or "FAT32"
         if fs.startswith("EXT4"):
             logger.error(tr("fmt.ext4_err"))
             return False
-        label = self.label_var.get().strip() or "LUNACI"
+        label = fmt_opts.get("label") or "LUNACI"
         letter = dev.letter
         size_hint = dev.size
         logger.info(tr("ui.autofmt_start"))
         if not run_format(logger, letter, fs, label, quick=True,
-                          size_hint=size_hint):
+                          size_hint=size_hint, cancel=self.cancel_event):
             return False
         # Format sonrası diskin geri gelmesini bekle (en fazla 30 sn)
         if not self._wait_drive_ready(letter, logger, timeout=30.0):
             return False
-        self.monitor.request_poll()
+        self.monitor.request_poll(force=True)
         return True
 
     def _wait_drive_ready(self, letter: str, logger: Emitter,
@@ -702,10 +864,20 @@ class LunaciApp(ctk.CTk):
         if not dev or not src or not os.path.isdir(src):
             return
         engine = self.cfg.get("copy_engine") or "shutil"
+        # GUVENLIK: otomatik bicimlendirme acikken diske yazmak TUM veriyi
+        # silebilir; bu yuzden yazmadan once mutlaka onay istenir.
+        if not messagebox.askyesno(
+                tr("dlg.copy.title"),
+                tr("dlg.copy.body", name=os.path.basename(src), l=dev.letter,
+                   dev=dev.name)
+                + ("\n\n" + tr("dlg.will_format") if self.autofmt_enabled() else ""),
+                icon="warning"):
+            return
         self._log("INFO", tr("ui.copy_engine", l=dev.letter, e=engine))
+        fmt_opts = self._fmt_opts_snapshot()   # ANA iş parçacığında oku
 
         def task(logger):
-            if not self._preflight_format(logger, dev):
+            if not self._preflight_format(logger, dev, fmt_opts):
                 return False, None
             return copy_folder(src, dev.letter, logger, self.cancel_event,
                                engine=engine, progress=self._progress_emit), None
@@ -723,8 +895,10 @@ class LunaciApp(ctk.CTk):
                 + ("\n\n" + tr("dlg.will_format") if self.autofmt_enabled() else "")):
             return
 
+        fmt_opts = self._fmt_opts_snapshot()   # ANA iş parçacığında oku
+
         def task(logger):
-            if not self._preflight_format(logger, dev):
+            if not self._preflight_format(logger, dev, fmt_opts):
                 return False, None
             return zip_folder_to_device(src, dev.letter, logger, self.cancel_event,
                                         progress=self._progress_emit), None
@@ -751,7 +925,7 @@ class LunaciApp(ctk.CTk):
 
         def task(logger):
             ok = run_format(logger, dev.letter, fs, label, quick=quick,
-                            size_hint=dev.size)
+                            size_hint=dev.size, cancel=self.cancel_event)
             return (ok, fs if ok else None)
 
         self._start_task("format", tr("task.format", l=dev.letter), task,
@@ -767,7 +941,7 @@ class LunaciApp(ctk.CTk):
             return
 
         def task(logger):
-            return run_repair(logger, dev.letter), None
+            return run_repair(logger, dev.letter, cancel=self.cancel_event), None
 
         self._start_task("repair", tr("task.repair", l=dev.letter), task,
                          cancellable=False)
@@ -790,8 +964,10 @@ class LunaciApp(ctk.CTk):
                 icon="warning"):
             return
 
+        fmt_opts = self._fmt_opts_snapshot()   # ANA iş parçacığında oku
+
         def task(logger):
-            if not self._preflight_format(logger, dev):
+            if not self._preflight_format(logger, dev, fmt_opts):
                 return False, None
             return write_iso_raw(path, dev.letter, logger, self.cancel_event,
                                  progress=self._progress_emit), None
@@ -815,8 +991,10 @@ class LunaciApp(ctk.CTk):
                 icon="warning"):
             return
 
+        fmt_opts = self._fmt_opts_snapshot()   # ANA iş parçacığında oku
+
         def task(logger):
-            if not self._preflight_format(logger, dev):
+            if not self._preflight_format(logger, dev, fmt_opts):
                 return False, None
             return write_zip_to_device(path, dev.letter, logger, self.cancel_event,
                                        progress=self._progress_emit), None
@@ -870,10 +1048,10 @@ class LunaciApp(ctk.CTk):
                      font=ctk.CTkFont(family="Segoe UI", size=17,
                                       weight="bold")).pack(pady=(4, 2))
         ctk.CTkLabel(win, text=f"{tr('about.version')} {APP_VERSION}",
-                     text_color="gray", font=self.font_small).pack()
+                     text_color=MUTED, font=self.font_small).pack()
 
         def link(text: str, url: str) -> None:
-            lbl = ctk.CTkLabel(win, text=text, text_color="#3b82f6",
+            lbl = ctk.CTkLabel(win, text=text, text_color=LINK,
                                font=ctk.CTkFont(family="Segoe UI", size=13,
                                                 underline=True),
                                cursor="hand2")
@@ -889,8 +1067,9 @@ class LunaciApp(ctk.CTk):
         link(WEBSITE_URL, WEBSITE_URL)
         link(f"GitHub → {GITHUB_URL}", GITHUB_URL)
 
-        ctk.CTkButton(win, text="✕", width=40, fg_color="#7f1d1d",
-                      hover_color="#6b1414", command=win.destroy).pack(
+        ctk.CTkButton(win, text="✕", width=40, fg_color=DANGER_BTN,
+                      hover_color=DANGER_BTN_H, text_color=WHITE,
+                      command=win.destroy).pack(
             side="bottom", pady=14)
 
     # ------------------------------------------------------- konsol UI ------
@@ -916,7 +1095,16 @@ class LunaciApp(ctk.CTk):
         except Exception:
             pass
         self.cancel_event.set()
-        self.cfg.set("volume_label", self.label_var.get().strip() or "LUNACI")
-        theme = self.theme_map.get(self.theme_menu.get(), "system")
-        self.cfg.set("theme", theme)
+        try:
+            self.cfg.set("volume_label", self.label_var.get().strip() or "LUNACI")
+            theme = self.theme_map.get(self.theme_menu.get(), "system")
+            self.cfg.set("theme", theme)
+        except Exception:
+            pass
+        # Bekleyen ayar yazimini kapatmadan once diske isle (OneDrive kilidi
+        # olsa bile UI donmadan, kapanis sirasinda senkron tamamlanir).
+        try:
+            self.cfg.flush()
+        except Exception:
+            pass
         self.destroy()
