@@ -627,10 +627,13 @@ class LunaciApp(ctk.CTk):
     def _preflight_format(self, logger, dev) -> bool:
         """Yazma işleminden önce açıksa hızlı biçimlendirme yapar.
 
-        Biçimlendirme yönetici yetkisi ve disk numarası gerektirir; başarısız
-        olursa False dönülür ve yazma işlemi başlatılmaz.
+        * fs/label ANA iş parçacığında okunur (Tk değişkenleri arka plandan
+          güvenle okunmaz). Görev iş parçacığı yalnızca bu değerleri kullanır.
+        * Biçimlendirme sonrası diskin yeniden erişilebilir olması BEKLENİR;
+          aksi halde yazım hemen başlayınca "disk bulunamadı" hatası alınırdı.
         """
         if not self.autofmt_enabled():
+            self._log("INFO", tr("ui.autofmt_skip"))
             return True
         if not is_admin():
             logger.error(tr("ui.admin_needed"))
@@ -640,14 +643,36 @@ class LunaciApp(ctk.CTk):
             logger.error(tr("fmt.ext4_err"))
             return False
         label = self.label_var.get().strip() or "LUNACI"
+        letter = dev.letter
+        size_hint = dev.size
         logger.info(tr("ui.autofmt_start"))
-        if not run_format(logger, dev.letter, fs, label, quick=True,
-                          size_hint=dev.size):
+        if not run_format(logger, letter, fs, label, quick=True,
+                          size_hint=size_hint):
             return False
-        # Biçimlendikten sonra cihaz listesi tazelenmeli; bir saniye bekle
-        time.sleep(1.0)
+        # Format sonrası diskin geri gelmesini bekle (en fazla 30 sn)
+        if not self._wait_drive_ready(letter, logger, timeout=30.0):
+            return False
         self.monitor.request_poll()
         return True
+
+    def _wait_drive_ready(self, letter: str, logger: Emitter,
+                          timeout: float = 30.0) -> bool:
+        """diskpart sonrası diskin yeniden erişilebilir olmasını bekler."""
+        root = f"{letter}:\\"
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if self.cancel_event.is_set():
+                return False
+            if os.path.isdir(root):
+                try:
+                    os.listdir(root)
+                    logger.ok(tr("ui.autofmt_ready", l=letter))
+                    return True
+                except OSError:
+                    pass
+            time.sleep(0.5)
+        logger.error(tr("ui.autofmt_not_ready", l=letter))
+        return False
 
     def _open_reports(self) -> None:
         folder = self.reports_dir()
