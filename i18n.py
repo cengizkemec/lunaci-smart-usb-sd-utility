@@ -1,0 +1,421 @@
+"""Lunaci çok dilli destek (Türkçe / İngilizce).
+
+Kullanım:
+    from i18n import tr, set_language
+    set_language("en")
+    tr("fmt.start", mode="Quick", l="E", fs="FAT32")
+"""
+from __future__ import annotations
+
+_language = "tr"
+
+TR = {
+    # ---- arayüz ----
+    "app.subtitle": "Canlı cihaz algılama · biçimlendirme · dosya aktarımı · onarım",
+    "badge.admin": "YÖNETİCİ",
+    "badge.limited": "SINIRLI MOD",
+    "theme.system": "Sistem",
+    "theme.dark": "Koyu",
+    "theme.light": "Aydınlık",
+    "dev.section": "BAĞLI CİHAZ",
+    "dev.empty": "Takılı cihaz yok",
+    "dev.waiting": "Takılı cihaz bekleniyor...",
+    "dev.usage": "Kullanım: %{p}  ({u} / {t})",
+    "dev.bus": "Veri yolu",
+    "dev.readonly": "YAZMA KORUMALI",
+    "dev.unknown": "Bilinmeyen Cihaz",
+    "dev.raw": "RAW / BİLİNMİYOR",
+    "health.unknown": "Test edilmedi",
+    "health.good": "İYİ",
+    "health.warn": "UYARI",
+    "health.crit": "KRİTİK",
+    "health.status": "Durum: {s}",
+    "btn.health": "Sağlık Testi",
+    "folder.section": "YAZDIRILACAK KLASÖR",
+    "folder.placeholder": "Klasör seçin...",
+    "btn.browse": "Gözat",
+    "btn.write_folder": "Klasörü Diske Yaz",
+    "btn.zip_folder": "Klasörü ZIP Yaz",
+    "switch.reports": "Raporları kaydet",
+    "btn.reports": "Raporlara Gözat",
+    "switch.autofmt": "Yazmadan önce otomatik biçimlendir",
+    "ui.autofmt_start": "Yazmadan önce disk hızlı biçimlendiriliyor...",
+    "ui.autofmt_skip": "Otomatik biçimlendirme kapalı; mevcut içerik üzerine yazılacak.",
+    "dlg.will_format": "UYARI: Önce disk hızlı biçimlendirilecek (tüm veriler silinir).",
+    "fmt.section": "DOSYA SİSTEMİ",
+    "fmt.label": "BİRİM ADI",
+    "btn.quick_format": "Hızlı Biçimlendir",
+    "btn.full_format": "Detaylı Biçimlendir (Sektör Taramalı)",
+    "fmt.hint": "Detaylı biçimlendirme tüm sektörleri tarar ve sıfırlar (uzun sürer).",
+    "tools.section": "İMAJ & ONARIM",
+    "btn.iso": "ISO Yazdır",
+    "btn.zip": "ZIP Yazdır",
+    "btn.repair": "Bozuk Diski Onar",
+    "tools.hint": "ISO: ham (DD) imaj yazımı · ZIP: arşiv içeriğini diske yazdırır · "
+                  "Onarım: yazma koruması temizleme + chkdsk /f /r",
+    "log.section": "CANLI İŞLEM KONSOLU",
+    "btn.clear": "Temizle",
+    "btn.save": "Kaydet",
+    "btn.about": "Hakkında",
+    "status.ready": "Hazır",
+    "status.failed": "İşlem başarısız",
+    "btn.cancel": "İptal",
+    "app.starting": "Lunaci başlatıldı. Cihazlar taranıyor...",
+    "pick.folder_title": "Yazdırılacak klasörü seçin",
+    "pick.iso_title": "ISO imajı seçin",
+    "pick.zip_title": "ZIP arşivi seçin",
+    "file.all": "Tüm dosyalar",
+    "file.iso": "ISO imajları",
+    "file.zip": "ZIP arşivleri",
+    # ---- diyaloglar ----
+    "dlg.fmt.title": "Biçimlendirme Onayı",
+    "dlg.fmt.body": "{l}: ({name}, {size}) diski {fs} ile {mode} biçimlendirilecek.\n\n"
+                    "TÜM VERİLER SİLİNECEK!\nDevam edilsin mi?",
+    "dlg.mode.quick": "Hızlı",
+    "dlg.mode.full": "Detaylı (sektör taramalı)",
+    "dlg.repair.title": "Disk Onarımı",
+    "dlg.repair.body": "{l}: diski onarılacak:\n• Yazma koruması (readonly) temizlenecek\n"
+                       "• chkdsk /f /r ile bozuk sektörler taranacak\n"
+                       "• RAW durumda bölüm yeniden oluşturulacak\n\nDevam edilsin mi?",
+    "dlg.iso.title": "ISO Yazdırma Onayı",
+    "dlg.iso.body": "{name} ({size})\n{l}: ({dev}) diske HAM modda yazılacak.\n\n"
+                    "UYARI: Disk üzerindeki TÜM VERİLER silinecek!\nDevam edilsin mi?",
+    "dlg.zip.title": "ZIP Yazdırma Onayı",
+    "dlg.zip.body": "{name} arşivinin İÇERİĞİ {l}: ({dev}) diskin köküne açılır "
+                    "(yazdırılır).\n\nAynı adlı dosyaların üzerine yazılabilir. "
+                    "Devam edilsin mi?",
+    "dlg.zipfolder.title": "Klasörü ZIP Yaz",
+    "dlg.zipfolder.body": "'{name}' klasörü {l}: diskinde ZIP dosyası olarak "
+                          "oluşturulacak.\nDevam edilsin mi?",
+    "dlg.ext4.title": "Desteklenmiyor",
+    "dlg.ext4.body": "EXT4, Windows üzerinde biçimlendirilemez.",
+    "dlg.about.title": "Hakkında",
+    "about.maker": "Yapımcı",
+    "about.website": "Web sitesi",
+    "about.repo": "GitHub deposu",
+    "about.version": "Sürüm",
+    # ---- görev durumları ----
+    "task.format": "Biçimlendiriliyor: {l}:",
+    "task.repair": "Onarılıyor: {l}:",
+    "task.iso": "ISO yazılıyor → {l}:",
+    "task.zip": "ZIP yazdırılıyor → {l}:",
+    "task.zipfolder": "ZIP hazırlanıyor → {l}:",
+    "task.copy": "Klasör kopyalanıyor → {l}:",
+    "task.health": "Sağlık testi: {l}:",
+    "ui.busy": "Devam eden bir işlem var ({k}); lütfen bitmesini bekleyin.",
+    "ui.admin_needed": "Bu işlem yönetici yetkisi gerektirir. Uygulamayı yönetici olarak "
+                       "yeniden başlatın (başlangıçta UAC sorulur).",
+    "ui.copy_engine": "Kopyalama hedefi: {l}:  · motor: {e}",
+    "ui.report_saved": "Rapor kaydedildi: {p}",
+    "ui.report_error": "Rapor kaydedilemedi: {e}",
+    "ui.console_saved": "Konsol kaydedildi: {p}",
+    "ui.console_error": "Konsol kaydedilemedi: {e}",
+    "ui.cancel_req": "İptal isteği gönderildi...",
+    "ui.reports_open": "Rapor klasörü: {p}",
+    # ---- izleyici ----
+    "mon.added": "Cihaz takıldı → {d}  [{f}]",
+    "mon.removed": "Cihaz çıkarıldı → {l}:",
+    "mon.error": "Cihaz algılama hatası: {e}",
+    # ---- biçimlendirme / onarım ----
+    "fmt.ext4_err": "EXT4, Windows diskpart ile biçimlendirilemez; Linux ortamı gerekir "
+                    "(gparted vb.).",
+    "fmt.bad_fs": "Desteklenmeyen dosya sistemi: {fs}",
+    "fmt.fat32_warn": "Windows, 32 GB üzeri sürücülerde FAT32 oluşturmayı desteklemez; "
+                      "işlem başarısız olabilir. exFAT önerilir.",
+    "fmt.start": "Biçimlendirme ({mode}) → {l}:  [{fs}]",
+    "fmt.ok": "{l}: biçimlendirildi → {fs}",
+    "fmt.ok_l": '{l}: biçimlendirildi → {fs}  ad="{ad}"',
+    "fmt.fallback_warn": "Doğrudan biçimlendirme başarısız; disk temizlenip yeniden "
+                         "bölümlenecek (TÜM VERİLER silinecek)...",
+    "fmt.disknum_err": "Disk numarası belirlenemedi; clean işlemi güvenlik nedeniyle "
+                       "iptal edildi.",
+    "fmt.clean_ok": "{l}: disk temizlendi, bölümlendi ve {fs} ile biçimlendirildi.",
+    "fmt.fail": "Biçimlendirme başarısız (diskpart çıkış kodu {c}).",
+    "rep.not_found": "{l}: sürücü bulunamadı (çıkarılmış olabilir).",
+    "rep.start": "Onarım başlatıldı → {l}: {n}  [{f}]",
+    "rep.readonly_warn": "Windows bu diski YAZMA KORUMALI (readonly) olarak görüyor.",
+    "rep.readonly_ok": "Yazma koruması (readonly) temizlendi.",
+    "rep.readonly_fail": "Yazma koruması temizlenemedi; yine de devam ediliyor...",
+    "rep.chkdsk_start": "chkdsk /f /r çalıştırılıyor — bozuk sektörler taranıyor, bu uzun "
+                        "sürebilir...",
+    "rep.chkdsk_ok": "chkdsk tamamlandı; hata bulunamadı veya düzeltildi.",
+    "rep.chkdsk_warn": "chkdsk çıkış kodu: {c} (RAW bölümde hata vermesi normaldir).",
+    "rep.raw_warn": "Sürücü RAW durumda görünüyor; bölüm yeniden oluşturuluyor...",
+    "rep.raw_fs": "Önerilen dosya sistemi: {fs}",
+    "rep.done": "Onarım işlemi tamamlandı.",
+    # ---- kopyalama / ZIP / ISO ----
+    "copy.missing_src": "Hedef klasör bulunamadı: {p}",
+    "copy.dst_error": "{d} erişilemiyor.",
+    "copy.start": "Kopyalama başlıyor: {n} dosya, {s} → {d}",
+    "copy.cancelled": "Kopyalama iptal edildi.",
+    "copy.partial_removed": "Kopyalama iptal edildi; yarım dosya silindi.",
+    "copy.file_error": "  {rel} → {e}",
+    "copy.done": "Kopyalama tamamlandı: {c} kopyalandı, {s} atlandı, {e} hata · "
+                 "{w} / {t} sn ({sp} MB/s)",
+    "copy.progress": "Kopyalanıyor %{p}",
+    "copy.progress_speed": "Kopyalanıyor %{p}  ·  {sp} MB/s",
+    "robocopy.done": "Robocopy tamamlandı (kod {c} — kopyalandı/atlandı/değiştirildi).",
+    "robocopy.fail": "Robocopy başarısız (kod {c}).",
+    "iso.invalid": "Geçerli bir ISO dosyası değil: {p}",
+    "iso.start": "ISO yazılıyor: {name} ({size}) → {l}:",
+    "iso.warn": "DİKKAT: Hedef diskteki TÜM VERİLER bu imaj ile ezilecek!",
+    "iso.dismount_warn": "Hacim ayrılamadı (meşgul olabilir); yine de yazılacak. "
+                         "Hedefteki tüm pencereleri kapatın.",
+    "iso.open_err": "Ham disk açılamadı: {e} (Yönetici yetkisi gerekiyor)",
+    "iso.cancel": "İPTAL: Disk kısmen yazıldı ({w}). Cihaz artık önyükleme yapmayabilir!",
+    "iso.write_err": "Yazma hatası: {e}",
+    "iso.done": "ISO yazımı tamamlandı: {w} / {s} · {t} sn ({sp} MB/s)",
+    "iso.rescan": "Disk listesi yenilendi. Değişikliklerin görülmesi için cihazı çıkarıp "
+                  "tekrar takın.",
+    "zip.invalid": "Geçerli bir ZIP arşivi değil: {p}",
+    "zip.folder_start": "Klasör ZIP olarak paketleniyor: {n} dosya, {s} → {d}",
+    "zip.folder_error": "  {rel} → {e}",
+    "zip.folder_cancelled": "ZIP oluşturma iptal edildi.",
+    "zip.folder_removed": "Yarım ZIP dosyası silindi.",
+    "zip.folder_error_top": "ZIP oluşturma hatası: {e}",
+    "zip.folder_done": "ZIP oluşturuldu: {d} · {s} (sıkıştırma %{r}) · {n} dosya, "
+                       "{e} hata · {t} sn",
+    "zip.progress": "ZIP hazırlanıyor %{p}",
+    "zip.extract_start": "ZIP diske yazdırılıyor: {name} → {d}",
+    "zip.extract_count": "Arşivde {n} dosya, toplam {s}",
+    "zip.traversal": "Güvenlik: yoldan kaçış engellendi → {name}",
+    "zip.extract_error": "  {name} → {e}",
+    "zip.extract_cancelled": "ZIP yazdırma iptal edildi.",
+    "zip.extract_progress": "ZIP açılıyor %{p}",
+    "zip.extract_warn": "ZIP yazdırma tamamlandı, {e} hata oluştu.",
+    "zip.extract_done": "ZIP diske yazdırıldı: {n} dosya, {s} · {t} sn",
+    "zip.read_error": "ZIP okuma hatası: {e}",
+    # ---- sağlık testi ----
+    "h.access_err": "{r} erişilemiyor.",
+    "h.readonly_err": "Disk yazma korumalı (readonly). 'Bozuk Diski Onar' işlevini deneyin.",
+    "h.raw_err": "Dosya sistemi RAW; önce biçimlendirme/onarım gerekir.",
+    "h.small_space": "Boş alan az; test 1 MB ile sınırlı.",
+    "h.write_start": "Yazma testi → {p} ({m} MB)",
+    "h.write_progress": "  yazıldı: {i}/{m} MB",
+    "h.write_speed": "Yazma hızı: {v} MB/s",
+    "h.read_start": "Okuma + doğrulama testi...",
+    "h.read_speed": "Okuma hızı: {v} MB/s",
+    "h.verify_ok": "Doğrulama başarılı: yazılan ve okunan veri birebir aynı.",
+    "h.mismatch": "VERİ TUTARSIZ! Yazılan ile okunan veri farklı — bozuk sektör / hafıza "
+                  "kartı hatası.",
+    "h.io_err": "Disk E/S hatası: {e}",
+    "h.cleanup_ok": "Test dosyası temizlendi.",
+    "h.cleanup_warn": "Test dosyası silinemedi: {e}",
+    "h.slow_write": "Yazma hızı çok düşük (<1 MB/s); kart ömrünün sonunda olabilir.",
+    "h.slow_read": "Okuma hızı çok düşük (<1.5 MB/s).",
+    "h.duration": "Test süresi: {t} sn  (yazılan: {w})",
+    "h.cancelled": "Sağlık testi iptal edildi.",
+}
+
+EN = {
+    "app.subtitle": "Live device detection · formatting · file transfer · repair",
+    "badge.admin": "ADMIN",
+    "badge.limited": "LIMITED MODE",
+    "theme.system": "System",
+    "theme.dark": "Dark",
+    "theme.light": "Light",
+    "dev.section": "CONNECTED DEVICE",
+    "dev.empty": "No device connected",
+    "dev.waiting": "Waiting for a device...",
+    "dev.usage": "Usage: %{p}  ({u} / {t})",
+    "dev.bus": "Bus",
+    "dev.readonly": "READ-ONLY",
+    "dev.unknown": "Unknown Device",
+    "dev.raw": "RAW / UNKNOWN",
+    "health.unknown": "Not tested",
+    "health.good": "GOOD",
+    "health.warn": "WARNING",
+    "health.crit": "CRITICAL",
+    "health.status": "Status: {s}",
+    "btn.health": "Health Test",
+    "folder.section": "FOLDER TO WRITE",
+    "folder.placeholder": "Select a folder...",
+    "btn.browse": "Browse",
+    "btn.write_folder": "Write Folder to Disk",
+    "btn.zip_folder": "Zip Folder to Disk",
+    "switch.reports": "Save reports",
+    "btn.reports": "Browse Reports",
+    "switch.autofmt": "Auto-format disk before writing",
+    "ui.autofmt_start": "Quick-formatting the disk before writing...",
+    "ui.autofmt_skip": "Auto-format is off; data will be written over existing content.",
+    "dlg.will_format": "WARNING: The disk will be quick-formatted first (all data erased).",
+    "fmt.section": "FILE SYSTEM",
+    "fmt.label": "VOLUME LABEL",
+    "btn.quick_format": "Quick Format",
+    "btn.full_format": "Full Format (Sector Scan)",
+    "fmt.hint": "Full format scans and zeros every sector (takes long).",
+    "tools.section": "IMAGE & REPAIR",
+    "btn.iso": "Write ISO",
+    "btn.zip": "Write ZIP",
+    "btn.repair": "Repair Disk",
+    "tools.hint": "ISO: raw (DD) image write · ZIP: extracts archive content to disk · "
+                  "Repair: clear read-only + chkdsk /f /r",
+    "log.section": "LIVE LOG CONSOLE",
+    "btn.clear": "Clear",
+    "btn.save": "Save",
+    "btn.about": "About",
+    "status.ready": "Ready",
+    "status.failed": "Operation failed",
+    "btn.cancel": "Cancel",
+    "app.starting": "Lunaci started. Scanning for devices...",
+    "pick.folder_title": "Select the folder to write",
+    "pick.iso_title": "Select an ISO image",
+    "pick.zip_title": "Select a ZIP archive",
+    "file.all": "All files",
+    "file.iso": "ISO images",
+    "file.zip": "ZIP archives",
+    "dlg.fmt.title": "Format Confirmation",
+    "dlg.fmt.body": "Drive {l}: ({name}, {size}) will be formatted as {fs} ({mode}).\n\n"
+                    "ALL DATA WILL BE ERASED!\nContinue?",
+    "dlg.mode.quick": "Quick",
+    "dlg.mode.full": "Full (sector scan)",
+    "dlg.repair.title": "Disk Repair",
+    "dlg.repair.body": "Drive {l}: will be repaired:\n• Read-only attribute will be cleared\n"
+                       "• chkdsk /f /r will scan for bad sectors\n"
+                       "• Partition will be recreated if RAW\n\nContinue?",
+    "dlg.iso.title": "ISO Write Confirmation",
+    "dlg.iso.body": "{name} ({size})\nwill be written in RAW mode to {l}: ({dev}).\n\n"
+                    "WARNING: ALL DATA ON THE DISK WILL BE ERASED!\nContinue?",
+    "dlg.zip.title": "ZIP Write Confirmation",
+    "dlg.zip.body": "The CONTENT of archive {name} will be extracted to the root of "
+                    "{l}: ({dev}).\n\nExisting files with the same names may be "
+                    "overwritten. Continue?",
+    "dlg.zipfolder.title": "Zip Folder",
+    "dlg.zipfolder.body": "Folder '{name}' will be packed into a ZIP file on drive {l}:.\n"
+                          "Continue?",
+    "dlg.ext4.title": "Not Supported",
+    "dlg.ext4.body": "EXT4 cannot be formatted on Windows.",
+    "dlg.about.title": "About",
+    "about.maker": "Developer",
+    "about.website": "Website",
+    "about.repo": "GitHub repository",
+    "about.version": "Version",
+    "task.format": "Formatting {l}:",
+    "task.repair": "Repairing {l}:",
+    "task.iso": "Writing ISO → {l}:",
+    "task.zip": "Extracting ZIP → {l}:",
+    "task.zipfolder": "Creating ZIP → {l}:",
+    "task.copy": "Copying folder → {l}:",
+    "task.health": "Health test {l}:",
+    "ui.busy": "An operation is already in progress ({k}); please wait for it to finish.",
+    "ui.admin_needed": "This operation requires administrator rights. Restart the app as "
+                       "administrator (UAC is asked at startup).",
+    "ui.copy_engine": "Copy target: {l}:  · engine: {e}",
+    "ui.report_saved": "Report saved: {p}",
+    "ui.report_error": "Could not save report: {e}",
+    "ui.console_saved": "Console saved: {p}",
+    "ui.console_error": "Could not save console: {e}",
+    "ui.cancel_req": "Cancel requested...",
+    "ui.reports_open": "Reports folder: {p}",
+    "mon.added": "Device plugged in → {d}  [{f}]",
+    "mon.removed": "Device removed → {l}:",
+    "mon.error": "Device detection error: {e}",
+    "fmt.ext4_err": "EXT4 cannot be formatted with Windows diskpart; a Linux environment "
+                    "is required (gparted etc.).",
+    "fmt.bad_fs": "Unsupported file system: {fs}",
+    "fmt.fat32_warn": "Windows cannot create FAT32 on drives larger than 32 GB; the "
+                      "operation may fail. exFAT is recommended.",
+    "fmt.start": "Formatting ({mode}) → {l}:  [{fs}]",
+    "fmt.ok": "{l}: formatted → {fs}",
+    "fmt.ok_l": '{l}: formatted → {fs}  label="{ad}"',
+    "fmt.fallback_warn": "Direct format failed; the disk will be cleaned and repartitioned "
+                         "(ALL DATA will be lost)...",
+    "fmt.disknum_err": "Disk number could not be determined; clean was cancelled for "
+                       "safety.",
+    "fmt.clean_ok": "{l}: disk cleaned, partitioned and formatted as {fs}.",
+    "fmt.fail": "Formatting failed (diskpart exit code {c}).",
+    "rep.not_found": "{l}: drive not found (it may have been unplugged).",
+    "rep.start": "Repair started → {l}: {n}  [{f}]",
+    "rep.readonly_warn": "Windows sees this disk as READ-ONLY.",
+    "rep.readonly_ok": "Read-only attribute cleared.",
+    "rep.readonly_fail": "Could not clear read-only; continuing anyway...",
+    "rep.chkdsk_start": "Running chkdsk /f /r — scanning bad sectors, this may take a "
+                        "long time...",
+    "rep.chkdsk_ok": "chkdsk finished; no errors found or errors were fixed.",
+    "rep.chkdsk_warn": "chkdsk exit code: {c} (failing on a RAW partition is normal).",
+    "rep.raw_warn": "Drive appears RAW; recreating the partition...",
+    "rep.raw_fs": "Suggested file system: {fs}",
+    "rep.done": "Repair completed.",
+    "copy.missing_src": "Source folder not found: {p}",
+    "copy.dst_error": "Cannot access {d}.",
+    "copy.start": "Copy starting: {n} files, {s} → {d}",
+    "copy.cancelled": "Copy cancelled.",
+    "copy.partial_removed": "Copy cancelled; partial file deleted.",
+    "copy.file_error": "  {rel} → {e}",
+    "copy.done": "Copy finished: {c} copied, {s} skipped, {e} errors · "
+                 "{w} / {t} sec ({sp} MB/s)",
+    "copy.progress": "Copying %{p}",
+    "copy.progress_speed": "Copying %{p}  ·  {sp} MB/s",
+    "robocopy.done": "Robocopy finished (code {c} — copied/skipped/changed).",
+    "robocopy.fail": "Robocopy failed (code {c}).",
+    "iso.invalid": "Not a valid ISO file: {p}",
+    "iso.start": "Writing ISO: {name} ({size}) → {l}:",
+    "iso.warn": "WARNING: ALL DATA ON THE TARGET DISK WILL BE OVERWRITTEN!",
+    "iso.dismount_warn": "Could not dismount the volume (it may be busy); writing anyway. "
+                         "Close all windows on the target.",
+    "iso.open_err": "Cannot open raw disk: {e} (Administrator rights required)",
+    "iso.cancel": "CANCELLED: Disk was partially written ({w}). The device may no longer "
+                  "boot!",
+    "iso.write_err": "Write error: {e}",
+    "iso.done": "ISO write finished: {w} / {s} · {t} sec ({sp} MB/s)",
+    "iso.rescan": "Disk list rescanned. Unplug and replug the device to see the changes.",
+    "zip.invalid": "Not a valid ZIP archive: {p}",
+    "zip.folder_start": "Packing folder to ZIP: {n} files, {s} → {d}",
+    "zip.folder_error": "  {rel} → {e}",
+    "zip.folder_cancelled": "ZIP creation cancelled.",
+    "zip.folder_removed": "Partial ZIP file deleted.",
+    "zip.folder_error_top": "ZIP creation error: {e}",
+    "zip.folder_done": "ZIP created: {d} · {s} (compression %{r}) · {n} files, "
+                       "{e} errors · {t} sec",
+    "zip.progress": "Preparing ZIP %{p}",
+    "zip.extract_start": "Extracting ZIP to disk: {name} → {d}",
+    "zip.extract_count": "Archive contains {n} files, {s} total",
+    "zip.traversal": "Security: path traversal blocked → {name}",
+    "zip.extract_error": "  {name} → {e}",
+    "zip.extract_cancelled": "ZIP extraction cancelled.",
+    "zip.extract_progress": "Extracting ZIP %{p}",
+    "zip.extract_warn": "ZIP extraction finished with {e} errors.",
+    "zip.extract_done": "ZIP written to disk: {n} files, {s} · {t} sec",
+    "zip.read_error": "ZIP read error: {e}",
+    "h.access_err": "Cannot access {r}.",
+    "h.readonly_err": "Disk is read-only. Try the 'Repair Disk' function.",
+    "h.raw_err": "File system is RAW; format/repair is required first.",
+    "h.small_space": "Low free space; test limited to 1 MB.",
+    "h.write_start": "Write test → {p} ({m} MB)",
+    "h.write_progress": "  written: {i}/{m} MB",
+    "h.write_speed": "Write speed: {v} MB/s",
+    "h.read_start": "Read + verification test...",
+    "h.read_speed": "Read speed: {v} MB/s",
+    "h.verify_ok": "Verification passed: written and read data are identical.",
+    "h.mismatch": "DATA MISMATCH! Read data differs from written data — bad sectors / "
+                  "memory card failure.",
+    "h.io_err": "Disk I/O error: {e}",
+    "h.cleanup_ok": "Test file deleted.",
+    "h.cleanup_warn": "Could not delete test file: {e}",
+    "h.slow_write": "Write speed is very low (<1 MB/s); the card may be near end of life.",
+    "h.slow_read": "Read speed is very low (<1.5 MB/s).",
+    "h.duration": "Test duration: {t} sec  (written: {w})",
+    "h.cancelled": "Health test cancelled.",
+}
+
+STRINGS = {"tr": TR, "en": EN}
+
+
+def set_language(lang: str) -> None:
+    global _language
+    _language = lang if lang in STRINGS else "tr"
+
+
+def get_language() -> str:
+    return _language
+
+
+def tr(key: str, **kwargs) -> str:
+    table = STRINGS.get(_language, TR)
+    text = table.get(key, TR.get(key, key))
+    if kwargs:
+        try:
+            return text.format(**kwargs)
+        except Exception:
+            return text
+    return text
