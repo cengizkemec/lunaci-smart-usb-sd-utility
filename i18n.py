@@ -55,7 +55,7 @@ TR = {
     "btn.repair": "Bozuk Diski Onar",
     "tools.hint": "ISO: ham (DD) imaj yazımı · ZIP: arşiv içeriğini diske yazdırır · "
                   "Onarım: yazma koruması temizleme + chkdsk /f /r",
-    "log.section": "CANLI İŞLEM KONSOLU",
+    "log.section": "CANLI İŞLEM KONSOLU  ·  dosya listesi + günlük",
     "btn.clear": "Temizle",
     "btn.save": "Kaydet",
     "btn.about": "Hakkında",
@@ -133,12 +133,7 @@ TR = {
                           "Sürümü GitHub sayfasından indirin.",
     "update.manual": "GitHub sürüm sayfası açılıyor...",
     "switch.sound": "Bildirim sesi",
-    # ---- canlı aktarım (FTP tarzı) ----
-    "xf.section": "CANLI AKTARIM",
-    "xf.col.file": "Dosya",
-    "xf.col.size": "Boyut",
-    "xf.col.status": "Durum",
-    "xf.col.speed": "Hız",
+    # ---- birlesik konsol: aktarim satirlari ----
     "xf.state.active": "Aktarılıyor",
     "xf.state.done": "Tamamlandı",
     "xf.state.skip": "Atlandı",
@@ -323,7 +318,7 @@ EN = {
     "btn.repair": "Repair Disk",
     "tools.hint": "ISO: raw (DD) image write · ZIP: extracts archive content to disk · "
                   "Repair: clear read-only + chkdsk /f /r",
-    "log.section": "LIVE LOG CONSOLE",
+    "log.section": "LIVE OPERATION CONSOLE  ·  file list + log",
     "btn.clear": "Clear",
     "btn.save": "Save",
     "btn.about": "About",
@@ -398,11 +393,6 @@ EN = {
                           "Download the release from GitHub.",
     "update.manual": "Opening the GitHub release page...",
     "switch.sound": "Sound notification",
-    "xf.section": "LIVE TRANSFER",
-    "xf.col.file": "File",
-    "xf.col.size": "Size",
-    "xf.col.status": "Status",
-    "xf.col.speed": "Speed",
     "xf.state.active": "Transferring",
     "xf.state.done": "Done",
     "xf.state.skip": "Skipped",

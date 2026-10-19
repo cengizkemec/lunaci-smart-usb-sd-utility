@@ -39,6 +39,9 @@ single dark/light-themed desktop app with a live log console.
 - **Live transfer console** — while copying, extracting or writing, every file is
   listed with size, status and per-file speed (like an FTP client), plus a running
   `done/total` summary.
+- **Single merged console** — the live file list and the timestamped log share one
+  console: file rows stay as one block at the bottom while log lines flow in above them,
+  and a single progress bar tracks the whole job.
 - **Automatic updates** — checks the GitHub repository for new releases on startup
   (and on demand via **Check for Updates**), then downloads and restarts itself with
   the new version.
@@ -50,8 +53,8 @@ single dark/light-themed desktop app with a live log console.
 - **Turkish / English UI** — switch languages from the header; the choice is remembered.
 - **Dark / Light / System themes** — follows the Windows theme automatically. Both
   themes are contrast-checked; log and transfer colours re-tune when you switch.
-- **Live log console** — timestamped, colour-coded output (diskpart transcripts,
-  copy percentages, errors); Clear and Save buttons.
+- **Console tools** — timestamped, colour-coded output (diskpart transcripts, copy
+  percentages, errors); Clear and Save buttons.
 - **Reports** — every successful operation can be saved as a text report in the
   `reports` folder **next to the program** (not in the target folder), with a
   *Browse Reports* button that opens the folder directly.

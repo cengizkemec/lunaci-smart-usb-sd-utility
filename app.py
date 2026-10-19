@@ -55,6 +55,12 @@ DANGER_BTN_H = ("#B71C1C", "#A62727")
 CANCEL_BTN = ("#C62828", "#B91C1C")     # iptal butonu
 CANCEL_BTN_H = ("#B71C1C", "#991B1B")
 WHITE = ("#FFFFFF", "#FFFFFF")
+# Segment dugmelerde secili parcayi vurgulayan vurgu rengi. Koyu/acik
+# eslesmesi, beyaz yazi ile 4.5:1 kontrastin uzerinde kalir.
+SEL_COLOR = ("#3B6FA8", "#3F76B0")
+SEL_COLOR_H = ("#33608F", "#5589C4")
+ACCENT = ("#3B6FA8", "#3F76B0")         # ana (vurgu) butonlar
+ACCENT_H = ("#33608F", "#5589C4")
 
 LED_COLORS = {"unknown": "#6b7280", GOOD: "#22c55e", WARN: "#eab308", CRIT: "#ef4444"}
 HEALTH_KEY = {"unknown": "health.unknown", GOOD: "health.good",
@@ -96,7 +102,6 @@ class LunaciApp(ctk.CTk):
         self._device_map: dict = {}
         self._fs_synced_letter: str | None = None
         self._log_tags: set = set()
-        self._log_lines = 0
         self._indeterminate = False
         self._about = None
         # performans/onluklar: degismedikce Tk widget'larina dokunulmaz
@@ -104,12 +109,12 @@ class LunaciApp(ctk.CTk):
         self._menu_current: str = ""
         self._target_cache: tuple = (None, False, 0.0)
         self._target_checking = False
-        # canli aktarim paneli (FTP tarzi)
+        # Birlesik konsol: dosya aktarim satirlari + gunluk kayitlari ayni
+        # metin kutusunda tutulur (satirlar dogrudan guncellenir).
         self._xf_rows: dict = {}
-        self._xf_order: list = []
+        self._xf_count = 0
         self._xf_max = 3000
         self._xf_head = (0, 0, "")
-        self._iso_info = None
         self._update_dialog = None
         self._update_running = False
 
@@ -169,8 +174,9 @@ class LunaciApp(ctk.CTk):
 
         self.grid_columnconfigure(0, weight=3)
         self.grid_columnconfigure(1, weight=2)
-        self.grid_rowconfigure(3, weight=3)
-        self.grid_rowconfigure(4, weight=2)
+        # Konsol tek panel oldugu icin kalan tum dikey alani kaplar; boylece
+        # iki panel arasindaki dikey kaydirma cakismasi ortadan kalkar.
+        self.grid_rowconfigure(3, weight=1)
 
         # üst başlık
         header = ctk.CTkFrame(self, fg_color="transparent")
@@ -189,11 +195,13 @@ class LunaciApp(ctk.CTk):
         self.admin_badge.grid(row=0, column=1, rowspan=2, padx=(8, 14))
         self.theme_menu = ctk.CTkSegmentedButton(
             header, values=[tr("theme.system"), tr("theme.dark"), tr("theme.light")],
-            command=self._on_theme, font=self.font_small, width=220)
+            command=self._on_theme, font=self.font_small, width=220,
+            selected_color=SEL_COLOR, selected_hover_color=SEL_COLOR_H)
         self.theme_menu.grid(row=0, column=2, rowspan=2, padx=(0, 8))
         self.lang_menu = ctk.CTkSegmentedButton(
             header, values=["TR", "EN"], command=self._on_language,
-            font=self.font_small, width=90)
+            font=self.font_small, width=90,
+            selected_color=SEL_COLOR, selected_hover_color=SEL_COLOR_H)
         self.lang_menu.grid(row=0, column=3, rowspan=2, padx=(0, 8))
         self.btn_update = ctk.CTkButton(header, text=tr("btn.update"), width=140,
                                         fg_color=SEC_BTN, hover_color=SEC_BTN_H,
@@ -214,6 +222,10 @@ class LunaciApp(ctk.CTk):
                                         font=self.font_small, text_color=MUTED)
         self.dev_section.grid(row=0, column=0, sticky="w", padx=12, pady=(10, 2))
         self.device_menu = ctk.CTkOptionMenu(dev_frame, width=340,
+                                             fg_color=ACCENT,
+                                             button_color=ACCENT_H,
+                                             button_hover_color=ACCENT_H,
+                                             text_color=WHITE,
                                              command=self._on_device_pick)
         self.device_menu.grid(row=0, column=1, columnspan=2, sticky="ew",
                               padx=12, pady=(10, 2))
@@ -236,6 +248,8 @@ class LunaciApp(ctk.CTk):
                                        text_color=MUTED)
         self.tech_label.grid(row=5, column=0, columnspan=3, sticky="w", padx=12, pady=(0, 6))
         self.btn_health = ctk.CTkButton(dev_frame, text=tr("btn.health"),
+                                        fg_color=ACCENT, hover_color=ACCENT_H,
+                                        text_color=WHITE,
                                         command=lambda: self._do_health())
         self.btn_health.grid(row=6, column=0, columnspan=3, sticky="ew", padx=12, pady=(2, 12))
 
@@ -255,9 +269,13 @@ class LunaciApp(ctk.CTk):
                                          state="readonly")
         self.target_entry.grid(row=0, column=0, sticky="ew", padx=(0, 6))
         self.btn_browse = ctk.CTkButton(row, text=tr("btn.browse"), width=70,
+                                        fg_color=ACCENT, hover_color=ACCENT_H,
+                                        text_color=WHITE,
                                         command=self._pick_folder)
         self.btn_browse.grid(row=0, column=1)
         self.btn_copy = ctk.CTkButton(tgt_frame, text=tr("btn.write_folder"),
+                                      fg_color=ACCENT, hover_color=ACCENT_H,
+                                      text_color=WHITE,
                                       command=self._do_copy)
         self.btn_copy.grid(row=2, column=0, sticky="ew", padx=12, pady=(8, 2))
         self.btn_zipfolder = ctk.CTkButton(tgt_frame, text=tr("btn.zip_folder"),
@@ -310,6 +328,8 @@ class LunaciApp(ctk.CTk):
         ctk.CTkEntry(fmt_frame, textvariable=self.label_var, width=160).grid(
             row=0, column=3, sticky="e", padx=(6, 12))
         self.btn_quick = ctk.CTkButton(fmt_frame, text=tr("btn.quick_format"),
+                                       fg_color=ACCENT, hover_color=ACCENT_H,
+                                       text_color=WHITE,
                                        command=lambda: self._do_format(True))
         self.btn_quick.grid(row=1, column=0, columnspan=2, sticky="ew",
                             padx=12, pady=(8, 2))
@@ -333,6 +353,8 @@ class LunaciApp(ctk.CTk):
         self.tools_section.grid(row=0, column=0, columnspan=2, sticky="w",
                                 padx=12, pady=(10, 2))
         self.btn_iso = ctk.CTkButton(tools_frame, text=tr("btn.iso"),
+                                     fg_color=ACCENT, hover_color=ACCENT_H,
+                                     text_color=WHITE,
                                      command=self._do_iso)
         self.btn_iso.grid(row=1, column=0, sticky="ew", padx=(12, 3), pady=(6, 2))
         self.btn_zip = ctk.CTkButton(tools_frame, text=tr("btn.zip"),
@@ -352,12 +374,12 @@ class LunaciApp(ctk.CTk):
         self.tools_hint.grid(row=3, column=0, columnspan=2, sticky="w", padx=12,
                              pady=(2, 10))
 
-        # log konsolu
+        # birlesik konsol: canli aktarim satirlari + gunluk kayitlari tek panelde
         log_frame = ctk.CTkFrame(self)
         log_frame.grid(row=3, column=0, columnspan=2, sticky="nsew",
-                       padx=18, pady=(6, 6))
+                       padx=18, pady=(6, 12))
         log_frame.grid_columnconfigure(0, weight=1)
-        log_frame.grid_rowconfigure(1, weight=1)
+        log_frame.grid_rowconfigure(3, weight=1)
         self.log_section = ctk.CTkLabel(log_frame, text=tr("log.section"),
                                         font=self.font_small, text_color=MUTED)
         self.log_section.grid(row=0, column=0, sticky="w", padx=12, pady=(8, 2))
@@ -371,49 +393,23 @@ class LunaciApp(ctk.CTk):
                                           text_color=SEC_BTN_T,
                                           command=self._save_console)
         self.btn_save_log.grid(row=0, column=2, padx=(0, 12))
-        self.log_box = ctk.CTkTextbox(log_frame, font=self.font_mono, wrap="word")
-        self.log_box.grid(row=1, column=0, columnspan=3, sticky="nsew",
-                          padx=12, pady=(0, 12))
-
-        # canlı aktarım paneli (FTP programlarındaki dosya listesi gibi)
-        xf_frame = ctk.CTkFrame(self)
-        xf_frame.grid(row=4, column=0, columnspan=2, sticky="nsew",
-                      padx=18, pady=(0, 6))
-        xf_frame.grid_columnconfigure(0, weight=1)
-        xf_frame.grid_rowconfigure(3, weight=1)
-        self.xf_section = ctk.CTkLabel(xf_frame, text=tr("xf.section"),
-                                       font=self.font_small, text_color=MUTED)
-        self.xf_section.grid(row=0, column=0, sticky="w", padx=12, pady=(8, 2))
-        head = ctk.CTkFrame(xf_frame, fg_color="transparent")
-        head.grid(row=1, column=0, sticky="ew", padx=12)
-        head.grid_columnconfigure(0, weight=1)
-        self.xf_headers = {}
-        for col, key in enumerate(("xf.col.file", "xf.col.status", "xf.col.size",
-                                   "xf.col.speed")):
-            lbl = ctk.CTkLabel(head, text=tr(key), font=self.font_small,
-                               text_color=MUTED,
-                               anchor="w" if col == 0 else "e")
-            lbl.grid(row=0, column=col, sticky="ew",
-                     padx=(0, 10) if col < 3 else 0)
-            self.xf_headers[key] = lbl
-        self.xf_progress = ctk.CTkProgressBar(xf_frame)
-        self.xf_progress.set(0)
-        self.xf_progress.grid(row=2, column=0, sticky="ew",
-                              padx=12, pady=(2, 0))
-        self.xf_body = ctk.CTkTextbox(xf_frame, font=self.font_mono, height=110,
-                                      wrap="none", activate_scrollbars=True)
-        self.xf_body.grid(row=3, column=0, sticky="nsew",
-                          padx=12, pady=(4, 0))
-        self.xf_summary = ctk.CTkLabel(xf_frame, text=tr("xf.empty"),
+        # Aktarim ozeti (yalnizca aktarim islerinde dolar). Ilerleme cubugu
+        # BURADA degil, alttaki tek durum cubugunda gosterilir; boylece
+        # ekranda iki ayri ilerleme cubugu karisikligi olmaz.
+        self.xf_summary = ctk.CTkLabel(log_frame, text=tr("xf.empty"),
                                        font=self.font_small, text_color=MUTED,
                                        anchor="w")
-        self.xf_summary.grid(row=4, column=0, sticky="ew",
-                             padx=12, pady=(2, 10))
+        self.xf_summary.grid(row=2, column=0, columnspan=3, sticky="ew",
+                             padx=12, pady=(0, 2))
+        self.log_box = ctk.CTkTextbox(log_frame, font=self.font_mono, wrap="none",
+                                      activate_scrollbars=True)
+        self.log_box.grid(row=3, column=0, columnspan=3, sticky="nsew",
+                          padx=12, pady=(0, 12))
         self._init_xf_tags()
 
         # durum çubuğu
         status = ctk.CTkFrame(self, fg_color="transparent")
-        status.grid(row=5, column=0, columnspan=2, sticky="ew", padx=18, pady=(0, 12))
+        status.grid(row=4, column=0, columnspan=2, sticky="ew", padx=18, pady=(0, 12))
         status.grid_columnconfigure(1, weight=1)
         self.status_label = ctk.CTkLabel(status, text=tr("status.ready"), anchor="w",
                                          font=self.font_small)
@@ -466,10 +462,7 @@ class LunaciApp(ctk.CTk):
         self.log_section.configure(text=tr("log.section"))
         self.btn_clear.configure(text=tr("btn.clear"))
         self.btn_save_log.configure(text=tr("btn.save"))
-        self.xf_section.configure(text=tr("xf.section"))
-        for key, lbl in self.xf_headers.items():
-            lbl.configure(text=tr(key))
-        if not self._xf_order:
+        if not self._xf_count:
             self.xf_summary.configure(text=tr("xf.empty"))
         self.btn_health.configure(text=tr("btn.health"))
         self.cancel_btn.configure(text=tr("btn.cancel"))
@@ -706,7 +699,7 @@ class LunaciApp(ctk.CTk):
         return dark if ctk.get_appearance_mode() == "Dark" else light
 
     def _init_xf_tags(self) -> None:
-        inner = getattr(self.xf_body, "_textbox", None)
+        inner = getattr(self.log_box, "_textbox", None)
         if inner is None:
             return
         for state in XF_COLORS:
@@ -714,46 +707,52 @@ class LunaciApp(ctk.CTk):
                 inner.tag_config(f"xf_{state}", foreground=self._xf_color(state))
             except Exception:
                 pass
-        try:
-            inner.tag_config("xf_path",
-                             foreground="#8b949e"
-                             if ctk.get_appearance_mode() == "Dark"
-                             else "#5F6B76")
-        except Exception:
-            pass
 
     def _xf_reset(self) -> None:
-        """Aktarım panelini temizler (yeni görev başında çağrılır)."""
+        """Birlesik konsolu temizler (yeni gorev basinda cagrilir)."""
         self._xf_rows = {}
-        self._xf_order = []
+        self._xf_count = 0
         self._xf_head = (0, 0, "")
-        self._iso_info = None
-        self.xf_progress.set(0)
         try:
-            self.xf_body.delete("1.0", "end")
+            self.log_box.delete("1.0", "end")
         except Exception:
             pass
-        self.xf_summary.configure(text=tr("xf.empty"))
+        try:
+            self.log_box.mark_unset(self.XF_MARK)
+        except Exception:
+            pass
+        self._log_tags.clear()
+        try:
+            self.xf_summary.configure(text=tr("xf.empty"))
+        except Exception:
+            pass
 
     def _on_file(self, name, size, state, speed, done, total, summary) -> None:
-        """Dosya aktarım olayı (ana thread'de çalışır)."""
+        """Dosya aktarim olayi (ana thread'de calisir).
+
+        Aktarim satirlari konsolun sonundaki bitisik blogu olusturur; ayni
+        dosyanin satiri yerinde guncellenir, boylece liste uzayip karmaşa
+        olusturmaz. Index'ler widget'in kendi satir numaralarindan turetilir
+        (elle tutulan sayac zamanla kayabilirdi).
+        """
         key = str(name)
-        row = self._xf_rows.get(key)
         line = self._xf_line(key, size, state, speed)
         try:
-            if row is None:
-                if len(self._xf_order) >= self._xf_max:
-                    return
-                self.xf_body.insert("end", line + "\n", f"xf_{state}")
-                self._xf_rows[key] = {"index": int(self.xf_body.index("end-1c")
-                                                   .split(".")[0])}
-                self._xf_order.append(key)
+            if key in self._xf_rows:
+                self._replace_xf_row(self._xf_rows[key], line, state)
             else:
-                idx = row["index"]
-                self.xf_body.delete(f"{idx}.0", f"{idx}.end")
-                self.xf_body.insert(f"{idx}.0", line, f"xf_{state}")
+                if self._xf_count >= self._xf_max:
+                    self._trim_xf_rows()
+                first_row = self._xf_count == 0
+                # Aktarim satirlari her zaman blogun sonuna eklenir.
+                self.log_box.insert("end", line + "\n", f"xf_{state}")
+                self._xf_rows[key] = self._log_end()
+                self._xf_count += 1
+                if first_row:
+                    # Blok tepesi: az once eklenen ilk satirin baslangici.
+                    self._ensure_mark(f"{self._xf_rows[key]}.0")
             if state in ("active", "done", "error"):
-                self.xf_body.see("end")
+                self.log_box.see("end")
         except Exception as exc:
             self._report_callback_error(exc)
         self._xf_head = (done, total, summary)
@@ -771,7 +770,102 @@ class LunaciApp(ctk.CTk):
         if not total:
             return
         text = tr("xf.summary", d=done, t=total, s=summary or "")
-        self.xf_summary.configure(text=text.strip())
+        try:
+            self.xf_summary.configure(text=text.strip())
+        except Exception:
+            pass
+
+    # ------------------------------------------- konsol satir yonetimi ------
+
+    # Aktarim blogunun tepesini isaretleyen Tk mark adi. Mark, onune metin
+    # eklendiginde kendiliginden kayar; boylece satir index'lerini elle
+    # saymak zorunda kalmayiz (eski sayac yaklasimi zamanla kayiyordu).
+    XF_MARK = "xf_block_start"
+
+    def _log_end(self) -> int:
+        """Konsolun son DOLU satir numarasi (bos konsol icin 0)."""
+        try:
+            content = self.log_box.get("1.0", "end")
+            if not content or content == "\n":
+                return 0
+            # get() sonuna bir "\n" ekler; satir sayisini ona gore hesapla.
+            return max(0, len(content.rstrip("\n").split("\n")))
+        except Exception:
+            return 0
+
+    def _ensure_mark(self, index: str = "end-1c") -> None:
+        """Aktarim blogu baslangic mark'ini (yoksa) verilen konuma kurar.
+
+        Gravity ``right`` (Tk varsayilani) kritik: mark'a metin eklendiginde
+        mark eklenen metnin ARDINA kayar. Gunlukler hep mark'a eklendigi icin
+        mark blokla birlikte asagi iner ve blogun gercek baslangicini gosterir.
+        """
+        try:
+            if self.XF_MARK not in self.log_box.mark_names():
+                self.log_box.mark_set(self.XF_MARK, index)
+            self.log_box.mark_gravity(self.XF_MARK, "right")
+        except Exception:
+            pass
+
+    def _block_start(self) -> int:
+        """Aktarim blogunun ilk satir numarasi (blok yoksa 0)."""
+        if not self._xf_count:
+            return 0
+        try:
+            if self.XF_MARK not in self.log_box.mark_names():
+                return 0
+            idx = self.log_box.index(self.XF_MARK)   # "satir.kolon"
+            return int(str(idx).split(".")[0])
+        except Exception:
+            return 0
+
+    def _reindex_xf_rows(self) -> None:
+        """Mark'tan baslayarak aktarim blogunun satir index'lerini tazeler."""
+        if not self._xf_rows:
+            return
+        base = self._block_start()
+        if base <= 0:
+            return
+        for i, key in enumerate(list(self._xf_rows)):
+            self._xf_rows[key] = base + i
+
+    def _append_xf_row(self, key: str, line: str, state: str) -> None:
+        """Aktarim satirini blogun SONUNA ekler."""
+        try:
+            self.log_box.insert("end", line + "\n", f"xf_{state}")
+        except Exception:
+            self.log_box.insert("end", line + "\n")
+        self._xf_rows[key] = self._log_end()
+
+    def _replace_xf_row(self, idx: int, line: str, state: str) -> None:
+        """Mevcut aktarim satirini yerinde gunceller (satir sayisi degismez)."""
+        try:
+            self.log_box.delete(f"{idx}.0", f"{idx}.end")
+            self.log_box.insert(f"{idx}.0", line, f"xf_{state}")
+        except Exception:
+            pass
+
+    def _trim_xf_rows(self) -> None:
+        """Blok 3000 satiri gecince en eski aktarim satirlarini siler."""
+        excess = self._xf_count - self._xf_max
+        if excess <= 0:
+            return
+        keys = list(self._xf_rows)[:excess]
+        first = self._xf_rows[keys[0]]
+        try:
+            self.log_box.delete(f"{first}.0", f"{first + excess}.0")
+        except Exception:
+            return
+        for key in keys:
+            self._xf_rows.pop(key, None)
+        self._xf_count = len(self._xf_rows)
+        # Silinen satirlardan sonra mark dogru yerde mi? Blok basi artik
+        # "first" satirinda; mark'i oraya tasi.
+        try:
+            self.log_box.mark_set(self.XF_MARK, f"{first}.0")
+        except Exception:
+            pass
+        self._reindex_xf_rows()
 
     def _on_progress(self, pct, text: str | None = None) -> None:
         """Ilerleme cubugunu gunceller. Bozuk/eksik deger gelse bile arayuz
@@ -791,16 +885,16 @@ class LunaciApp(ctk.CTk):
                 self.prog.set(max(0.0, min(1.0, float(pct) / 100.0)))
         except (TypeError, ValueError, tk.TclError):
             pass
-        try:
-            if pct is not None:
-                self.xf_progress.set(max(0.0, min(1.0, float(pct) / 100.0)))
-        except (TypeError, ValueError, tk.TclError):
-            pass
         if text:
             self._set_status(text)
 
     def _insert_logs(self, records) -> None:
         """Bir grup log kaydini TEK seferde yazar.
+
+        Birlesik konsolda dosya aktarim satirlari her zaman en alttaki bitisik
+        blogu olusturur; gunluk kayitlari bu blogun USTUNE yazilir. Boylece tek
+        panelde hem zaman damgali gunlukler hem de canli dosya listesi ayri
+        ayri, birbirine karismadan gorunur.
 
         Eski sürüm her satiri ayri ayri ekleyip her seferinde ``see("end")``
         cagiriyordu; binlerce dosyada bu ana thread'i doyurup arayuzu kilitliyordu.
@@ -810,11 +904,19 @@ class LunaciApp(ctk.CTk):
         total = len(records)
         if not total:
             return
+        # Aktarim blogunun baslangici: gunlukler bu satirin USTUNE girer.
+        # Mark tabanli index her zaman dogrudur; elle sayilan end-count+1
+        # yontemi blogun ilk satiri log'lardan sonra eklendiginde kayiyordu.
+        base = self._block_start()
+        insert_at = f"{base}.0" if base > 0 else "end"
         inner = getattr(self.log_box, "_textbox", None)
         if inner is None:
-            self.log_box.insert(
-                "end", "".join(
-                    f"[{r.time_str}] [{r.level:<5}] {r.message}\n" for r in records))
+            chunk = "".join(
+                f"[{r.time_str}] [{r.level:<5}] {r.message}\n" for r in records)
+            try:
+                self.log_box.insert(insert_at, chunk)
+            except Exception:
+                pass
         else:
             i = 0
             while i < total:
@@ -828,20 +930,27 @@ class LunaciApp(ctk.CTk):
                 chunk = "".join(parts)
                 self._ensure_log_tag(level, inner)
                 try:
-                    inner.insert("end", chunk, level)
+                    inner.insert(insert_at, chunk, level)
                 except Exception:
                     try:
-                        self.log_box.insert("end", chunk)
+                        self.log_box.insert(insert_at, chunk)
                     except Exception:
                         pass
                 i = j
-        self._log_lines += total
-        if self._log_lines > 6000:
-            try:
-                self.log_box.delete("1.0", f"{self._log_lines - 5000}.0")
-                self._log_lines = 5000
-            except Exception:
-                pass
+        # Aktarim blogu asagi kaydi; index'leri yeniden hesapla.
+        if self._xf_count:
+            self._reindex_xf_rows()
+        # Gunluk gecmisi cok uzarsa en eskileri at (aktarim blogu korunur).
+        try:
+            limit = 5000 + self._xf_count
+            live = self._log_end()
+            if live > limit:
+                drop = live - limit
+                self.log_box.delete("1.0", f"{drop + 1}.0")
+                if self._xf_count:
+                    self._reindex_xf_rows()
+        except Exception:
+            pass
         try:
             self.log_box.see("end")
         except Exception:
@@ -899,7 +1008,6 @@ class LunaciApp(ctk.CTk):
             self.prog.configure(mode="determinate")
             self._indeterminate = False
             self.prog.set(0)
-            self.xf_progress.set(0)
         except Exception:
             pass
         if key in XF_TASKS:
@@ -1072,9 +1180,9 @@ class LunaciApp(ctk.CTk):
         key = self.theme_map.get(choice, "system")
         ctk.set_appearance_mode(THEME_TO_MODE.get(key, "System"))
         self.cfg.set("theme", key)
-        # Etiketli gunluk satirlari eski temanin rengini korur; yenile.
+        # Konsol satirlari eski temanin rengini korur; ikisini de yenile
+        # (gunluk etiketleri + aktarim durum renkleri).
         self.after(50, self._refresh_log_tags)
-        # Aktarim paneli satirlari da eski temanin rengini korur; yenile.
         self.after(50, self._init_xf_tags)
 
     def _on_language(self, choice: str) -> None:
@@ -1195,7 +1303,9 @@ class LunaciApp(ctk.CTk):
         values = [tr(k) for k in ISO_MODE_KEYS]
         mode_map = {tr(k): ISO_MODE_VALUES[k] for k in ISO_MODE_KEYS}
         seg = ctk.CTkSegmentedButton(win, values=values, width=420,
-                                     font=self.font_small)
+                                     font=self.font_small,
+                                     selected_color=SEL_COLOR,
+                                     selected_hover_color=SEL_COLOR_H)
         seg.set(values[0])
         seg.pack(pady=(18, 6))
         ctk.CTkLabel(win, text=tr("iso.mode.hint"), text_color=MUTED,
@@ -1214,10 +1324,12 @@ class LunaciApp(ctk.CTk):
 
         row = ctk.CTkFrame(win, fg_color="transparent")
         row.pack(side="bottom", pady=14)
-        ctk.CTkButton(row, text=tr("iso.btn.write"), width=110, command=ok).pack(
-            side="left", padx=6)
+        ctk.CTkButton(row, text=tr("iso.btn.write"), width=110,
+                      fg_color=ACCENT, hover_color=ACCENT_H, text_color=WHITE,
+                      command=ok).pack(side="left", padx=6)
         ctk.CTkButton(row, text=tr("btn.cancel"), width=90,
                       fg_color=CANCEL_BTN, hover_color=CANCEL_BTN_H,
+                      text_color=WHITE,
                       command=win.destroy).pack(side="left", padx=6)
         win.wait_window()
         return chosen.get("mode")
@@ -1450,8 +1562,6 @@ class LunaciApp(ctk.CTk):
     # ------------------------------------------------------- konsol UI ------
 
     def _clear_log(self) -> None:
-        self.log_box.delete("1.0", "end")
-        self._log_lines = 0
         self._xf_reset()
 
     def _save_console(self) -> None:

@@ -1,11 +1,11 @@
-# Lunaci Smart USB & SD Card Utility v1.3.0
+# Lunaci Smart USB & SD Card Utility v1.3.1
 
 **Release date:** 2026-10-19
 
-This release adds the features requested after v1.2.0: a live transfer console that
-lists every file as it moves, Rufus-style **bootable ISO** writing, automatic
-self-updating from GitHub, a completion sound, and a full readability pass over the
-dark and light themes.
+This is a UI cleanup release. The live transfer list and the log console were split
+across two panels and the screen showed two progress bars, which looked cluttered and
+hard to follow. They are now merged into a **single console**, there is **one** progress
+bar, and the dark-theme buttons are readable again.
 
 ## Download
 
@@ -17,73 +17,56 @@ dark and light themes.
 > Administrator rights are requested automatically (UAC) on startup, because
 > `diskpart`, `chkdsk`, ISO mounting and raw ISO writing require elevation.
 
-## What's new in 1.3.0
+## What's new in 1.3.1
 
-### Live transfer console (like an FTP client)
+### One console instead of two panels
 
-Copying, ZIP extraction and ISO writing now show **every file** as it is transferred,
-with per-file size, status and transfer speed:
+The separate **Live Transfer** panel and the **Log** panel are gone. Everything now
+happens in a single console:
 
-- The active file is highlighted while it is being written; finished files are ticked.
-- Skipped (already present) and failed files are listed too, so you can see exactly
-  what made it to the disk.
-- A progress bar and a `done/total · size` summary track the whole job.
-- The list stays responsive even for tens of thousands of files (the oldest rows are
-  recycled automatically).
+- Time-stamped log records and the live file list share one area — no more glancing
+  between two boxes.
+- File rows always form one tidy block at the **bottom**; new log lines flow in **above**
+  them, so the two kinds of information never interleave and the list never looks
+  scrambled.
+- A file's row is updated **in place** as it moves (active → done / skipped / failed /
+  cancelled), so the list stays compact instead of growing one line per event.
+- The console fills all remaining window height and is horizontally scrollable, with a
+  narrower, cleaner layout overall.
 
-### Bootable ISO writing (Rufus-style)
+### A single progress bar
 
-The **ISO Write** dialog now asks which mode to use, and defaults to *Automatic*:
+The duplicate file-transfer progress bar was removed. The status bar now shows **one**
+progress bar for the whole job, alongside the `done/total · size` summary. (The bar in
+the device card is the device **occupancy** indicator, a different thing.)
 
-- **Automatic** — detects the image type. Windows installation images are written in
-  **bootable (ISO)** mode; everything else (Linux/`isohybrid`, etc.) is written
-  **raw (DD)**, which already boots.
-- **Raw (DD)** — the previous behaviour: the image is written byte-for-byte to the
-  disk. Best for Linux/`isohybrid` images.
-- **Bootable (ISO)** — mounts the image read-only, copies its contents onto a
-  formatted volume, and sets up the boot records:
-  - Windows images: `install.wim` over 4 GB is split into `install.swm` files with
-    `dism /Split-Image` so the FAT32/UEFI limit does not break the install.
-  - `bootsect` is used to write the BIOS boot code; the UEFI files
-    (`EFI\BOOT\BOOTX64.EFI`) are copied from the image, so both BIOS and UEFI boot
-    from the same stick.
+### Readable buttons in dark mode
 
-### Automatic self-update from GitHub
+Button text was rendering near-black on the accent colour, which was hard to read:
 
-Lunaci now checks the GitHub repository for new versions and can update itself:
+- The accent colour was deepened (`#5288C1` → `#3B6FA8` dark / `#3F76B0` light) so
+  white text reaches **≥ 4.5:1** contrast (WCAG AA) in both themes.
+- All accent buttons (Health, Browse, Copy, Quick Format, ISO Write, the ISO dialog's
+  write button, and the device dropdown) now use white text explicitly.
+- The red **Cancel** button in the ISO dialog no longer inherits dark text on dark red.
+- The selected segment of the file-system / mode pickers matches the new accent colour.
 
-- On startup (after ~2.5 s) it silently checks the latest release; you can also press
-  **Check for Updates** in the header or in the About window at any time.
-- When a newer version is available you get the release notes and a prompt to install.
-- Download happens in the background with progress in the log; the app then restarts
-  itself with the new executable.
-- The setting can be turned off in `config.json` (`auto_update_check`).
+## Everything from 1.3.0
 
-### Completion sound
+This release builds on v1.3.0, which added:
 
-A short system sound plays when a task finishes (format, copy, write, repair,
-health test). Toggle it with the new **Sound notification** switch, or via
-`sound_on_complete` in `config.json`.
+- **Live transfer console** (now merged — see above).
+- **Bootable ISO writing** (Rufus-style): automatic mode detection, Windows `install.wim`
+  splitting to `install.swm`, `bootsect` + UEFI files for BIOS/UEFI boot.
+- **Automatic self-update from GitHub** with release notes and background download.
+- **Completion sound** (toggleable).
+- **Readability pass** over the dark and light themes.
 
-### Readability fixes (dark + light)
-
-Both themes were audited for contrast and the hard-to-read elements were corrected:
-
-- **Log console colours** are now theme-aware. Previously the console used dark-theme
-  colours in both modes, making text nearly invisible in light mode and washed out in
-  dark mode. Every level (INFO/OK/WARN/ERROR/CMD) now has a colour tuned for the
-  active theme, and re-colours instantly when you switch themes.
-- **Muted/secondary text** was darkened in light mode and lightened in dark mode so it
-  is readable on both card and window backgrounds.
-- **Danger and cancel buttons** now use a deeper red with white text (the old red
-  failed contrast checks).
-- **Transfer console** colours follow the theme as well.
-
-## Stability and performance (carried over from 1.2.0)
+## Stability and performance
 
 - Rewritten, non-blocking device polling with plug/unplug events.
 - All long operations run off the UI thread and are safely cancellable.
-- Batched log updates keep the interface responsive under heavy output.
+- Batched console updates keep the interface responsive under heavy output.
 - Diskpart/`chkdsk` calls have hard timeouts and a cancel watchdog.
 
 ## Requirements

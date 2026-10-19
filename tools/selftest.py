@@ -400,6 +400,41 @@ try:
     app = LunaciApp()
     check("LunaciApp olusturuldu", True)
 
+    # Birlesik konsol: aktarim satirlari + gunluk TEK metin kutusunda olmali
+    # ve aralarina yeni gunluk geldiginde gunlukler aktarim blogunun USTUNE
+    # yazilmali (satirlar kaymamali / kaybolmamali).
+    try:
+        check("tek birlesik konsol (xf_body yok)", not hasattr(app, "xf_body"))
+        check("tek ilerleme cubugu", not hasattr(app, "xf_progress"))
+
+        class _Rec:
+            def __init__(self, level, msg):
+                self.level, self.message, self.time_str = level, msg, "00:00:00"
+
+        app._xf_reset()
+        app._insert_logs([_Rec("INFO", "LOG-ONE")])
+        app._on_file("klasor/a.jpg", 10, "active", 0.0, 1, 2, "1 KB")
+        app._on_file("klasor/a.jpg", 10, "done", 5.0, 1, 2, "1 KB")
+        app._on_file("klasor/b.jpg", 10, "done", 5.0, 2, 2, "1 KB")
+        body = app.log_box.get("1.0", "end")
+        check("aktarim satirlari konsolda", "a.jpg" in body and "b.jpg" in body)
+        check("ayni dosya tek satirda guncellendi",
+              body.count("a.jpg") == 1, body.count("a.jpg"))
+        app._insert_logs([_Rec("WARN", "LOG-TWO")])
+        lines = app.log_box.get("1.0", "end").splitlines()
+        li = next((i for i, l in enumerate(lines) if "LOG-TWO" in l), -1)
+        fi = next((i for i, l in enumerate(lines) if "a.jpg" in l), -1)
+        check("sonraki gunluk aktarim blogunun ustunde",
+              li >= 0 and fi >= 0 and li < fi, f"log={li} dosya={fi}")
+        app._on_file("klasor/a.jpg", 10, "error", 0.0, 2, 2, "1 KB")
+        check("gunluk sonrasi satir guncellenebilir",
+              "a.jpg" in app.log_box.get("1.0", "end"))
+        app._clear_log()
+        check("temizleme konsolu bosaltiyor",
+              app.log_box.get("1.0", "end").strip() == "")
+    except Exception as exc:  # noqa: BLE001
+        check("birlesik konsol testi", False, exc)
+
     # Ilerleme cubugu: diskpart'in kullandigi "belirsiz mod" + bozuk deger
     # hicbir sekilde hata firlatmamali (CTk start() argumansizdir).
     try:
