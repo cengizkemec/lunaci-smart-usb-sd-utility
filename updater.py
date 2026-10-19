@@ -195,18 +195,22 @@ def _write_update_script(new_exe: str) -> str:
     lines = [
         "@echo off",
         "chcp 65001 >nul",
+        # Uygulama kapanana kadar bekle (ping, timeout'a gore stdin
+        # yonlendirilmis olsa da guvenilir calisir).
         "ping 127.0.0.1 -n 3 >nul",
         f'set "NEW={new_exe}"',
         f'set "OLD={sys.executable}"',
         'copy /y "%NEW%" "%OLD%" >nul',
-        'if errorlevel 1 (',
-        '  ping 127.0.0.1 -n 3 >nul',
+        "if errorlevel 1 (",
+        "  ping 127.0.0.1 -n 3 >nul",
         '  copy /y "%NEW%" "%OLD%" >nul',
-        ')',
+        ")",
         'start "" "%OLD%"',
+        # Yeni EXE'yi ve guncelleme klasorunu temizle (yalnizca hedeflenmis
+        # yollar; ust klasoru silmeye calismak riskli olurdu).
         'ping 127.0.0.1 -n 3 >nul',
         'del /f /q "%NEW%" >nul 2>&1',
-        'rd /s /q "%NEW%\\.." >nul 2>&1',
+        'for %%I in ("%NEW%") do rd /s /q "%%~dpI" >nul 2>&1',
         'del /f /q "%~f0" >nul 2>&1',
     ]
     with open(script_path, "w", encoding="utf-8", errors="replace",
