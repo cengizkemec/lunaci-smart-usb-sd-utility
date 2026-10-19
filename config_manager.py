@@ -12,7 +12,7 @@ import sys
 import threading
 
 APP_NAME = "Lunaci Smart USB & SD Card Utility"
-APP_VERSION = "1.2.0"
+APP_VERSION = "1.3.0"
 GITHUB_URL = "https://github.com/cengizkemec/lunaci-smart-usb-sd-utility"
 WEBSITE_URL = "https://cengizkemec.com.tr/"
 
@@ -33,6 +33,11 @@ def resource_path(relative: str) -> str:
 
 CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
 
+# GitHub deposu (guncelleme denetimi ve surum sayfasi icin)
+GITHUB_OWNER = "cengizkemec"
+GITHUB_REPO = "lunaci-smart-usb-sd-utility"
+UPDATE_ASSET_NAME = "LunaciSmartUSBCardUtility.exe"
+
 DEFAULTS = {
     "theme": "system",                 # system | dark | light
     "language": "tr",                  # tr | en
@@ -48,6 +53,8 @@ DEFAULTS = {
     # istege bagli acilista otomatik saglik testi (varsayilan: kapali)
     "auto_health_check": False,
     "health_test_mb": 8,
+    "sound_on_complete": True,          # islem bitince kisa bildirim sesi
+    "auto_update_check": True,          # acilista GitHub'dan guncelleme denetle
 }
 
 

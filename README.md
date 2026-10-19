@@ -28,14 +28,28 @@ single dark/light-themed desktop app with a live log console.
   auto-format is enabled).
 - **Zip Folder to Disk** — packs the selected folder into `<Folder>.zip` on the device
   (ZIP_DEFLATED, level 6).
-- **Write ISO** — writes an `.iso` image in raw/DD mode (`\\.\X:` via
-  CreateFile/WriteFile/FlushFileBuffers), with volume dismount and disk rescan.
+- **Write ISO** — writes an `.iso` image with three selectable modes:
+  - **Automatic** (default) — Windows installation images are written **bootable**
+    (Rufus-style); Linux/`isohybrid` and other images are written **raw (DD)**.
+  - **Raw (DD)** — byte-for-byte image write (`\\.\X:` via
+    CreateFile/WriteFile/FlushFileBuffers), with volume dismount and disk rescan.
+  - **Bootable (ISO)** — mounts the image, copies its contents to a formatted volume,
+    splits `install.wim` over 4 GB into `install.swm` (FAT32/UEFI), and writes the
+    BIOS boot code via `bootsect`, so the stick boots both BIOS and UEFI.
+- **Live transfer console** — while copying, extracting or writing, every file is
+  listed with size, status and per-file speed (like an FTP client), plus a running
+  `done/total` summary.
+- **Automatic updates** — checks the GitHub repository for new releases on startup
+  (and on demand via **Check for Updates**), then downloads and restarts itself with
+  the new version.
+- **Completion sound** — a short system sound when a task finishes (toggleable).
 - **Write ZIP** — extracts a `.zip` archive to the device root safely (path-traversal
   protected).
 - **Repair Disk** — clears `attributes disk/volume readonly` and runs
   `chkdsk /f /r`; automatically recreates the partition on RAW disks.
 - **Turkish / English UI** — switch languages from the header; the choice is remembered.
-- **Dark / Light / System themes** — follows the Windows theme automatically.
+- **Dark / Light / System themes** — follows the Windows theme automatically. Both
+  themes are contrast-checked; log and transfer colours re-tune when you switch.
 - **Live log console** — timestamped, colour-coded output (diskpart transcripts,
   copy percentages, errors); Clear and Save buttons.
 - **Reports** — every successful operation can be saved as a text report in the
@@ -85,6 +99,7 @@ py -m PyInstaller --noconfirm --clean lunaci.spec      # → dist\LunaciSmartUSB
 | `disk_manager.py` | Device detection + `diskpart` format/repair services |
 | `file_ops.py` | Folder copy, raw ISO write, ZIP pack/extract, reports |
 | `health.py` | Write/read health test (SHA-256 verification) |
+| `updater.py` | GitHub release check, download and self-restart |
 | `config_manager.py` | Settings, paths, version, resource lookup |
 | `utils.py` | Emitter/log records, subprocess helpers, elevation |
 | `lunaci.spec` / `setup.iss` | PyInstaller / Inno Setup build scripts |

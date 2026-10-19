@@ -1,11 +1,11 @@
-# Lunaci Smart USB & SD Card Utility v1.2.0
+# Lunaci Smart USB & SD Card Utility v1.3.0
 
-**Release date:** 2026-10-18
+**Release date:** 2026-10-19
 
-This release is a major stability and performance update. The whole application was
-re-audited end-to-end: the freezing/hanging problems are fixed, device detection is now
-near-instantaneous, the interface has been redesigned with a modern Telegram-inspired
-theme, and every long-running operation can be cancelled safely.
+This release adds the features requested after v1.2.0: a live transfer console that
+lists every file as it moves, Rufus-style **bootable ISO** writing, automatic
+self-updating from GitHub, a completion sound, and a full readability pass over the
+dark and light themes.
 
 ## Download
 
@@ -15,108 +15,89 @@ theme, and every long-running operation can be cancelled safely.
 | `LunaciSmartUSBCardUtility.exe` | Portable single-file executable — just run it, no installation needed. |
 
 > Administrator rights are requested automatically (UAC) on startup, because
-> `diskpart`, `chkdsk` and raw ISO writing require elevation.
+> `diskpart`, `chkdsk`, ISO mounting and raw ISO writing require elevation.
 
-## What's new in 1.2.0
+## What's new in 1.3.0
 
-### Stop-the-freeze fixes
+### Live transfer console (like an FTP client)
 
-The app could previously hang and stop responding. The root causes were found and fixed:
+Copying, ZIP extraction and ISO writing now show **every file** as it is transferred,
+with per-file size, status and transfer speed:
 
-- **Rewritten device polling loop.** A single unexpected event or malformed message can no
-  longer kill the refresh timer — the UI keeps updating in every case, and errors are
-  written to `error.log` instead of silently freezing the window.
-- **Device monitor can no longer die.** The background monitor is fully guarded: even if the
-  underlying detection fails, it recovers on the next tick and continues reporting.
-- **No more per-line log flood.** Log output is now batched (one widget update per level
-  run, one scroll at the end), which removes the biggest UI bottleneck during heavy
-  operations (thousands of files no longer freeze the log console).
-- **`diskpart` and `chkdsk` now have real timeouts** (10 minutes for quick operations,
-  12 hours for full sector-scan) and are killed **together with their child processes**,
-  so a stuck external tool can never lock up the application.
-- **Settings are written in the background.** `config.json` saves no longer block the
-  interface (previously a synchronous write on the main thread, which is especially slow
-  when the app lives inside a OneDrive-synced folder). The final write is flushed on exit.
-- **Folder existence check is now asynchronous.** Checking the selected source folder no
-  longer performs a blocking filesystem/drive call on the UI thread.
-- **Progress bar fixed in indeterminate mode.** While an unmeasurable phase runs (for
-  example while `diskpart` works) the progress bar used an unsupported argument and raised
-  an internal error every time. It now animates correctly, and unexpected progress values
-  are ignored instead of surfacing as errors.
-- **Cancel is honoured everywhere.** Copy, ISO write, ZIP write/extract and the health test
-  all stop within a couple of seconds, and processes are terminated cleanly.
+- The active file is highlighted while it is being written; finished files are ticked.
+- Skipped (already present) and failed files are listed too, so you can see exactly
+  what made it to the disk.
+- A progress bar and a `done/total · size` summary track the whole job.
+- The list stays responsive even for tens of thousands of files (the oldest rows are
+  recycled automatically).
 
-### Performance
+### Bootable ISO writing (Rufus-style)
 
-- **Instant device detection.** Drive letters are read with a direct Windows API call
-  (bitmask) on every tick; the full PowerShell/wmic scan only runs when the set of drives
-  actually changes. Idle CPU usage is dramatically lower than in v1.1.0.
-- **4 MB transfer buffers** for folder copy and ISO writing, with speed reported in MB/s.
-- **Option menus are only rebuilt when their content changes**, instead of every 3 seconds.
-- **Reports are written asynchronously**, so generating a report never blocks the UI.
+The **ISO Write** dialog now asks which mode to use, and defaults to *Automatic*:
 
-### New Telegram-inspired theme
+- **Automatic** — detects the image type. Windows installation images are written in
+  **bootable (ISO)** mode; everything else (Linux/`isohybrid`, etc.) is written
+  **raw (DD)**, which already boots.
+- **Raw (DD)** — the previous behaviour: the image is written byte-for-byte to the
+  disk. Best for Linux/`isohybrid` images.
+- **Bootable (ISO)** — mounts the image read-only, copies its contents onto a
+  formatted volume, and sets up the boot records:
+  - Windows images: `install.wim` over 4 GB is split into `install.swm` files with
+    `dism /Split-Image` so the FAT32/UEFI limit does not break the install.
+  - `bootsect` is used to write the BIOS boot code; the UEFI files
+    (`EFI\BOOT\BOOTX64.EFI`) are copied from the image, so both BIOS and UEFI boot
+    from the same stick.
 
-- Brand-new dark and light colour schemes inspired by Telegram Desktop:
-  - **Dark:** deep blue-grey background (`#17212B`), soft cards (`#242F3D`) and the classic
-    Telegram blue accent (`#5288C1` / `#6AB3F2` hover).
-  - **Light:** clean white/grey cards with the same blue accent.
-- Consistent rounded cards, segmented buttons, switches and progress bars.
-- "System" mode follows the Windows light/dark setting automatically.
-- The theme is a standard CustomTkinter theme file (`assets/theme_lunaci.json`).
+### Automatic self-update from GitHub
 
-### Safety improvements
+Lunaci now checks the GitHub repository for new versions and can update itself:
 
-- **FAT32 > 32 GB is blocked before touching the disk.** Windows cannot create FAT32 on a
-  volume larger than 32 GB. Previously the app would fail and then fall back to a
-  `clean`, which erased the disk for nothing. Now it refuses up front and tells you to
-  choose exFAT or NTFS — your data is left untouched.
-- **Confirmation prompt before writing a folder to disk** when auto-format is enabled,
-  because that path erases the device first.
-- Read-only state can still be cleared automatically during repair.
-- Boot/system drives are always excluded and can never be selected.
+- On startup (after ~2.5 s) it silently checks the latest release; you can also press
+  **Check for Updates** in the header or in the About window at any time.
+- When a newer version is available you get the release notes and a prompt to install.
+- Download happens in the background with progress in the log; the app then restarts
+  itself with the new executable.
+- The setting can be turned off in `config.json` (`auto_update_check`).
 
-### Diagnostics
+### Completion sound
 
-- New `error.log` is written next to the program whenever an unexpected error occurs,
-  which makes bug reports much easier.
-- `LUNACI_SMOKE_TEST=<seconds>` environment variable runs a short self-check GUI session
-  without requesting elevation (useful for troubleshooting; no effect in normal use).
+A short system sound plays when a task finishes (format, copy, write, repair,
+health test). Toggle it with the new **Sound notification** switch, or via
+`sound_on_complete` in `config.json`.
 
-## Verification
+### Readability fixes (dark + light)
 
-This release was validated with an automated **43-check self-test suite** covering
-compilation, translation completeness, theme integrity, asynchronous settings persistence,
-the FAT32 guard, process cancellation, a real 1200-file copy + ZIP round-trip on a virtual
-drive, monitor resilience, progress-bar handling and a live GUI session in which deliberately
-malformed events are injected — the suite asserts that the interface survives them and that
-**not a single UI error** is recorded. Additionally, the packaged executable was launched and
-smoke-tested to confirm it starts cleanly with no errors.
+Both themes were audited for contrast and the hard-to-read elements were corrected:
+
+- **Log console colours** are now theme-aware. Previously the console used dark-theme
+  colours in both modes, making text nearly invisible in light mode and washed out in
+  dark mode. Every level (INFO/OK/WARN/ERROR/CMD) now has a colour tuned for the
+  active theme, and re-colours instantly when you switch themes.
+- **Muted/secondary text** was darkened in light mode and lightened in dark mode so it
+  is readable on both card and window backgrounds.
+- **Danger and cancel buttons** now use a deeper red with white text (the old red
+  failed contrast checks).
+- **Transfer console** colours follow the theme as well.
+
+## Stability and performance (carried over from 1.2.0)
+
+- Rewritten, non-blocking device polling with plug/unplug events.
+- All long operations run off the UI thread and are safely cancellable.
+- Batched log updates keep the interface responsive under heavy output.
+- Diskpart/`chkdsk` calls have hard timeouts and a cancel watchdog.
 
 ## Requirements
 
-- Windows 10 or Windows 11 (64-bit)
-- Administrator rights for formatting, repairing and ISO writing
+- Windows 10 / 11 (x64)
+- Administrator rights (requested automatically)
 
-## Links
+## Getting started
 
-- Website: https://cengizkemec.com.tr/
-- Repository: https://github.com/cengizkemec/lunaci-smart-usb-sd-utility
-- Made by **Cengiz Kemeç**
+1. Plug in your USB stick or SD card — it is detected automatically.
+2. Pick a file system (defaults to the device's current one) and press **Format**.
+3. Copy a folder, write an ISO, extract a ZIP, or run a health test.
 
 ---
 
-## Türkçe (özet)
-
-Bu sürüm büyük bir kararlılık ve performans güncellemesidir. Uygulamanın donma/kilitlenme
-sorunları giderildi, cihaz algılama neredeyse anlık hâle getirildi, arayüz Telegram
-esintili modern bir temayla yeniden tasarlandı ve tüm uzun süren işlemler güvenle iptal
-edilebilir hâle geldi.
-
-- Donma nedenleri giderildi: yeniden yazılan cihaz izleme döngüsü, toplu günlük yazımı,
-  `diskpart`/`chkdsk` için zaman aşımı + alt süreç sonlandırma, arka planda ayar kaydetme,
-  arka planda klasör kontrolü.
-- Performans: anlık sürücü algılama (Windows API bitmask), 4 MB aktarım tamponu, MB/s hız.
-- Yeni Telegram esintili koyu/açık tema.
-- Güvenlik: 32 GB üzeri FAT32 artık diske dokunmadan engellenir.
-- Klasöre yazma işlemi için onay penceresi eklendi.
+Full change log: see `CHANGELOG` in the repository, or open **Check for Updates**
+inside the app.

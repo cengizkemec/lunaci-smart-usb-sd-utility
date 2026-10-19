@@ -122,6 +122,22 @@ def elevate_current_process() -> bool:
         return False
 
 
+# ------------------------------------------------------------ bildirim -----
+
+def play_notification(ok: bool = True) -> None:
+    """İşlem bittiğinde kısa bir sistem bildirim sesi çalar (Windows).
+
+    Herhangi bir nedenle ses çalınamazsa sessizce yutulur; arayüzü asla
+    etkilemez. Başarılı işlemde bilgi sesi, hatalı işlemde uyarı sesi kullanılır.
+    """
+    try:
+        import winsound
+        winsound.MessageBeep(
+            winsound.MB_ICONASTERISK if ok else winsound.MB_ICONHAND)
+    except Exception:
+        pass
+
+
 # ------------------------------------------------------------- biçim -------
 
 def human_bytes(n) -> str:

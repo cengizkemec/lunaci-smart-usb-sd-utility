@@ -2,7 +2,7 @@
 ; Derlemek için: ISCC.exe setup.iss
 
 #define MyAppName "Lunaci Smart USB & SD Card Utility"
-#define MyAppVersion "1.2.0"
+#define MyAppVersion "1.3.0"
 #define MyAppPublisher "Cengiz Kemeç"
 #define MyAppURL "https://cengizkemec.com.tr/"
 #define MyAppExeName "LunaciSmartUSBCardUtility.exe"

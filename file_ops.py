@@ -12,8 +12,11 @@ from i18n import tr
 from utils import human_bytes, run_diskpart, run_process, run_shell
 
 MB = 1024 * 1024
+GB = 1024 * MB
 CHUNK = 4 * MB          # buyuk tampon = daha az sistem cagrisi = daha hizli
 ProgressCb = Optional[Callable[[float, Optional[str]], None]]
+# Canli aktarim bildirimi: (dosya, boyut, durum, MB/s, tamamlanan, toplam, ozet)
+FileCb = Optional[Callable[[str, int, str, float, int, int, str], None]]
 
 # Cok dosyali klasorlerde satir basina log basmak arayuzu bogar; esik uzerinde
 # ozet satiri uretilir (rapor yine de tum dosyalari tutar).
@@ -69,7 +72,8 @@ def save_report(text: str, folder: str, name: str) -> str:
 # ------------------------------------------------------------- kopyalama ----
 
 def copy_folder(src: str, letter: str, logger, cancel,
-                engine: str = "shutil", progress: ProgressCb = None) -> bool:
+                engine: str = "shutil", progress: ProgressCb = None,
+                file_cb: FileCb = None) -> bool:
     """Hedef klasörün içeriğini diskin köküne güvenle aktarır."""
     src = os.path.abspath(src)
     if not os.path.isdir(src):
@@ -80,11 +84,13 @@ def copy_folder(src: str, letter: str, logger, cancel,
         logger.error(tr("copy.dst_error", d=dst))
         return False
     if engine == "robocopy":
-        return _robocopy_copy(src, dst, logger, progress)
-    return _shutil_copy(src, dst, logger, cancel, progress)
+        return _robocopy_copy(src, dst, logger, progress, file_cb)
+    return _shutil_copy(src, dst, logger, cancel, progress, file_cb)
 
 
-def _shutil_copy(src, dst, logger, cancel, progress: ProgressCb) -> bool:
+def _shutil_copy(src, dst, logger, cancel, progress: ProgressCb,
+                 file_cb: FileCb = None) -> bool:
+    """Klasör içeriğini diske kopyalar; her dosya için canlı aktarım bildirimi yayar."""
     files, total = _walk_files(src)
     verbose = len(files) <= _FILELOG_LIMIT
     logger.info(tr("copy.start", n=len(files), s=human_bytes(total), d=dst))
@@ -92,6 +98,15 @@ def _shutil_copy(src, dst, logger, cancel, progress: ProgressCb) -> bool:
     started = time.time()
     last_pct = -10
     last_emit = 0.0
+
+    def emit(file: str, size: int, state: str, speed: float,
+             done: int, count: int) -> None:
+        if not file_cb:
+            return
+        try:
+            file_cb(file, size, state, speed, done, count, human_bytes(total))
+        except Exception:
+            pass
 
     def emit_progress(force: bool = False) -> None:
         """Yüzde + anlık yazma hızını UI'a iletir (~0.25 sn'de bir)."""
@@ -106,20 +121,26 @@ def _shutil_copy(src, dst, logger, cancel, progress: ProgressCb) -> bool:
         speed = (done_bytes / max(now - started, 1e-6)) / MB  # MB/s
         progress(float(pct), tr("copy.progress_speed", p=pct, sp=f"{speed:.1f}"))
 
+    count = len(files)
     for path, st in files:
         if cancel.is_set():
             logger.warn(tr("copy.cancelled"))
             return False
         rel = os.path.relpath(path, src)
         target = os.path.join(dst, rel)
+        size = st.st_size if st else 0
         try:
             if st and os.path.exists(target):
                 tst = os.stat(target)
                 if tst.st_size == st.st_size and abs(tst.st_mtime - st.st_mtime) < 2:
                     skipped += 1
                     done_bytes += st.st_size
+                    emit(rel, size, "skip", 0.0, copied + skipped, count)
                     continue
             os.makedirs(os.path.dirname(target), exist_ok=True)
+            emit(rel, size, "active", 0.0, copied + skipped + 1, count)
+            f_start = time.time()
+            f_done = 0
             with open(path, "rb") as fi, open(target, "wb") as fo:
                 while True:
                     if cancel.is_set():
@@ -128,6 +149,7 @@ def _shutil_copy(src, dst, logger, cancel, progress: ProgressCb) -> bool:
                             os.remove(target)
                         except OSError:
                             pass
+                        emit(rel, size, "cancel", 0.0, copied + skipped, count)
                         logger.warn(tr("copy.partial_removed"))
                         return False
                     block = fi.read(CHUNK)
@@ -136,6 +158,7 @@ def _shutil_copy(src, dst, logger, cancel, progress: ProgressCb) -> bool:
                     fo.write(block)
                     written += len(block)
                     done_bytes += len(block)
+                    f_done += len(block)
                     emit_progress()
             if st:
                 try:
@@ -143,10 +166,14 @@ def _shutil_copy(src, dst, logger, cancel, progress: ProgressCb) -> bool:
                 except OSError:
                     pass
             copied += 1
+            f_elapsed = max(time.time() - f_start, 1e-6)
+            speed = (f_done / f_elapsed) / MB
+            emit(rel, size, "done", speed, copied + skipped, count)
             if verbose:
-                logger.info(f"  {rel}  ({human_bytes(st.st_size if st else 0)})")
+                logger.info(f"  {rel}  ({human_bytes(size)})")
         except OSError as exc:
             errors += 1
+            emit(rel, size, "error", 0.0, copied + skipped + errors, count)
             logger.error(tr("copy.file_error", rel=rel, e=exc))
         # done_bytes artışı chunk döngüsünde yapıldı; burada tekrarlanmıyor.
         pct = int(done_bytes * 100 / total) if total else 100
@@ -165,11 +192,14 @@ def _shutil_copy(src, dst, logger, cancel, progress: ProgressCb) -> bool:
     return errors == 0
 
 
-def _robocopy_copy(src, dst, logger, progress: ProgressCb) -> bool:
-    cmd = f'robocopy "{src}" "{dst}" /E /COPY:DAT /DCOPY:T /R:1 /W:1 /NFL /NDL'
+def _robocopy_copy(src, dst, logger, progress: ProgressCb,
+                   file_cb: FileCb = None) -> bool:
+    cmd = f'robocopy "{src}" "{dst}" /E /COPY:DAT /DCOPY:T /R:1 /W:1 /NP'
     logger.cmd("» " + cmd)
     percent_re = re.compile(r"^\s*(\d{1,3}(?:\.\d+)?)%")
-    state = {"pct": -20}
+    # robocopy satiri:  "           1234\tYol\\dosya.txt"
+    file_re = re.compile(r"^\s*(\d[\d,\.]*)\t(.+?)\s*$")
+    state = {"pct": -20, "count": 0}
 
     def on_line(line: str) -> None:
         m = percent_re.match(line)
@@ -183,7 +213,21 @@ def _robocopy_copy(src, dst, logger, progress: ProgressCb) -> bool:
         text = line.strip()
         if not text:
             return
-        if "ERROR" in text.upper()[:10]:
+        fm = file_re.match(line)
+        if fm:
+            try:
+                size = int(fm.group(1).replace(",", "").replace(".", ""))
+            except ValueError:
+                size = 0
+            if file_cb:
+                state["count"] += 1
+                try:
+                    file_cb(fm.group(2).strip(), size, "done", 0.0,
+                            state["count"], state["count"], "")
+                except Exception:
+                    pass
+        low = text.upper()
+        if low.startswith("ERROR") or " ERROR " in low:
             logger.error("  " + text)
         else:
             logger.cmd("  " + text)
@@ -269,6 +313,309 @@ def write_iso_raw(iso_path: str, letter: str, logger, cancel,
     return ok
 
 
+# ------------------------------------------- önyüklenebilir ISO yazma -------
+
+# ISO9660 birincil birim tanimlayicisi (PVD) — "CD001" imzasi.
+_ISO_PVD_OFFSET = 16 * 2048
+_MOUNT_WAIT = 25.0
+
+
+def _iso_kind(iso_path: str) -> str:
+    """ISO'nun turunu belirler: 'windows' | 'other' | 'unknown'.
+
+    ISO9660 PVD'sindeki "CD001" imzasi okunur; imaj icinde
+    ``sources/install.wim`` veya ``sources/install.esd`` aranirsa Windows
+    kurulum medyasi sayilir. Aranacak dosya adlari yalnizca ASCII oldugundan
+    ham bayt arama guvenlidir.
+    """
+    try:
+        with open(iso_path, "rb") as f:
+            f.seek(_ISO_PVD_OFFSET)
+            if f.read(5) != b"CD001":
+                return "unknown"
+            f.seek(0)
+            head = f.read(8 * MB)
+            if (b"INSTALL.WIM" in head.upper() or b"INSTALL.ESD" in head.upper()
+                    or b"SOURCES/BOOT.WIM" in head.upper()):
+                return "windows"
+            f.seek(max(0, os.path.getsize(iso_path) // 2))
+            mid = f.read(8 * MB).upper()
+            if b"INSTALL.WIM" in mid or b"INSTALL.ESD" in mid:
+                return "windows"
+            return "other"
+    except OSError:
+        return "unknown"
+
+
+def _mount_iso(iso_path: str) -> str:
+    """ISO'yu bir surucu harfine baglar ve harfi dondurur ('' = basarisiz).
+
+    ``Mount-DiskImage`` + ``Get-Volume`` kullanilir (Win8+ yerel destek).
+    """
+    ps = (
+        "$ErrorActionPreference='Stop';"
+        f"$img = Mount-DiskImage -ImagePath '{iso_path}' -PassThru;"
+        "$v = $img | Get-Volume;"
+        "if ($v.DriveLetter) { $v.DriveLetter } else { 'X' }"
+    )
+    rc, lines = run_powershell(ps, timeout=45)
+    text = "".join(lines).strip()
+    for token in reversed(text.split()):
+        token = token.strip().strip(":")
+        if len(token) == 1 and token.isalpha():
+            return token.upper()
+    return ""
+
+
+def _unmount_iso(iso_path: str) -> None:
+    try:
+        run_powershell(
+            f"Dismount-DiskImage -ImagePath '{iso_path}' "
+            "$ErrorActionPreference='SilentlyContinue'", timeout=30)
+    except Exception:
+        pass
+
+
+def _wait_volume_ready(letter: str, logger, timeout: float = 20.0) -> bool:
+    root = f"{letter}:\\"
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            if os.path.isdir(root):
+                os.listdir(root)
+                return True
+        except OSError:
+            pass
+        time.sleep(0.3)
+    return False
+
+
+def _copy_iso_tree(src: str, letter: str, logger, cancel, progress: ProgressCb,
+                   file_cb: FileCb) -> tuple:
+    """ISO içeriğini diske kopyalar. (ok, install_wim_var_mi, toplam_bayt) döner."""
+    files, total = _walk_files(src)
+    total = total or 1
+    dst = f"{letter}:\\"
+    logger.info(tr("iso.copy_start", n=len(files), s=human_bytes(total), l=letter))
+    copied = errors = done_bytes = 0
+    started = time.time()
+    last_emit = 0.0
+    wim_present = False
+    count = len(files)
+
+    for path, st in files:
+        if cancel.is_set():
+            return False, False, copied, done_bytes
+        rel = os.path.relpath(path, src)
+        low = rel.replace("/", "\\").lower()
+        if low in ("sources\\install.wim", "sources\\install.esd"):
+            wim_present = True
+            if st and st.st_size > (4 * GB - (64 * MB)):
+                # FAT32 tek dosya siniri: .wim bolunmezse kopyalanamaz.
+                logger.warn(tr("iso.skip_wim"))
+                done_bytes += st.st_size
+                continue
+        target = os.path.join(dst, rel)
+        size = st.st_size if st else 0
+        if file_cb:
+            try:
+                file_cb(rel, size, "active", 0.0, copied + 1, count,
+                        human_bytes(total))
+            except Exception:
+                pass
+        try:
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            f_start = time.time()
+            f_done = 0
+            with open(path, "rb") as fi, open(target, "wb") as fo:
+                while True:
+                    if cancel.is_set():
+                        fo.close()
+                        try:
+                            os.remove(target)
+                        except OSError:
+                            pass
+                        return False, wim_present, copied, done_bytes
+                    block = fi.read(CHUNK)
+                    if not block:
+                        break
+                    fo.write(block)
+                    done_bytes += len(block)
+                    f_done += len(block)
+                    if progress:
+                        now = time.time()
+                        if now - last_emit >= 0.25:
+                            last_emit = now
+                            pct = done_bytes * 100.0 / total
+                            sp = (done_bytes / max(now - started, 1e-6)) / MB
+                            progress(min(pct, 99.0),
+                                     tr("copy.progress_speed", p=f"{pct:.0f}",
+                                        sp=f"{sp:.1f}"))
+            if st:
+                try:
+                    os.utime(target, (st.st_atime, st.st_mtime))
+                except OSError:
+                    pass
+            copied += 1
+            f_elapsed = max(time.time() - f_start, 1e-6)
+            if file_cb:
+                try:
+                    file_cb(rel, size, "done", (f_done / f_elapsed) / MB,
+                            copied, count, human_bytes(total))
+                except Exception:
+                    pass
+        except OSError as exc:
+            errors += 1
+            if file_cb:
+                try:
+                    file_cb(rel, size, "error", 0.0, copied + errors, count, "")
+                except Exception:
+                    pass
+            logger.error(tr("copy.file_error", rel=rel, e=exc))
+    return errors == 0, wim_present, copied, done_bytes
+
+
+def _split_wim(src_letter: str, dst_letter: str, logger, cancel) -> bool:
+    """FAT32 için install.wim dosyasini ISO kaynagindan install.swm olarak böler.
+
+    Kaynak: bagli ISO'nun ``sources\\install.wim`` dosyasi (4 GB ustunde
+    oldugu icin hedefe kopyalanmamisti). Hedef: diskin ``sources\\`` klasoru.
+    """
+    wim = f"{src_letter}:\\sources\\install.wim"
+    swm = f"{dst_letter}:\\sources\\install.swm"
+    if not os.path.isfile(wim):
+        return False
+    logger.info(tr("iso.split_start", swm=human_bytes(3800 * MB)))
+    code, lines = run_process(
+        ["dism", "/English", "/Split-Image", f"/ImageFile:{wim}",
+         f"/SWMFile:{swm}", "/FileSize:3800"],
+        on_line=logger.cmd, timeout=6 * 3600, cancel=cancel)
+    if code == 0 and os.path.isfile(swm):
+        logger.ok(tr("iso.split_done"))
+        return True
+    logger.warn(tr("iso.split_fail", e="dism " + str(code)))
+    return False
+
+
+def _write_boot_code(letter: str, logger, cancel, is_fat32: bool = False) -> bool:
+    """BIOS + UEFI önyükleme kaydını yazar (Rufus'un DD-dışı yöntemi).
+
+    ``bootsect`` yalnızca Windows kurulum medyasinda anlamlidir; bulunamazsa
+    veya basarisiz olursa UEFI dosyalari zaten kopyalandigi icin yazim yine de
+    onyuklenebilir kalir (sadece eski BIOS donaniminda sorun cikabilir).
+    """
+    logger.info(tr("iso.boot_start"))
+    ok_any = False
+    targets = [
+        (["bootsect", "/nt60", f"{letter}:", "/mbr", "/force"], "MBR"),
+        (["bootsect", "/nt60", f"{letter}:", "/force"], "PBR"),
+    ]
+    for cmd, what in targets:
+        try:
+            code, _ = run_process(cmd, on_line=logger.cmd, timeout=120,
+                                  cancel=cancel)
+            if code == 0:
+                ok_any = True
+            else:
+                logger.debug(f"bootsect {what} çıkış kodu: {code}")
+        except FileNotFoundError:
+            logger.debug("bootsect bulunamadi")
+        except Exception as exc:
+            logger.debug(f"bootsect {what} hatasi: {exc}")
+    # UEFI: \EFI\BOOT\BOOTX64.EFI ISO içinden kopyalandi; ek dosya gerekmez.
+    if ok_any:
+        logger.ok(tr("iso.boot_ok"))
+    else:
+        logger.warn(tr("iso.boot_skip"))
+    return ok_any
+
+
+def write_iso_bootable(iso_path: str, letter: str, logger, cancel,
+                       progress: ProgressCb = None, file_cb: FileCb = None) -> bool:
+    """ISO içeriğini diske kopyalayarak önyüklenebilir (FAT32/NTFS) medya yazar.
+
+    Windows kurulum imajları FAT32'yi zorunlu kılar (UEFI). install.wim 4 GB
+    üzerindeyse ``dism /Split-Image`` ile bölünür; ardından önyükleme kaydı
+    yazılır. Bu yol imajı birebir kopyalamaz (ham DD'den farkı budur) ama
+    BIOS + UEFI önyükleme destekli medya üretir.
+    """
+    iso_path = os.path.abspath(iso_path)
+    if not os.path.isfile(iso_path):
+        logger.error(tr("iso.invalid", p=iso_path))
+        return False
+
+    # Bootable (ISO) modda dosyalarin kopyalanabilmesi icin hedefin bir
+    # dosya sistemi olmali. "Yazmadan once bicimlendir" kapaliyken RAW disk
+    # uzerine kopyalamak anlamsizdir; burada net bir mesaj verilir.
+    root = f"{letter}:\\"
+    try:
+        if not os.path.isdir(root):
+            os.listdir(root)
+    except OSError:
+        logger.error(tr("iso.fs_required"))
+        return False
+
+    drive = _mount_iso(iso_path)
+    if not drive:
+        logger.error(tr("iso.mount_fail", e="Mount-DiskImage"))
+        return False
+    if not _wait_volume_ready(drive, logger):
+        logger.error(tr("iso.mount_fail", e=drive))
+        _unmount_iso(iso_path)
+        return False
+    logger.ok(tr("iso.mount_ok", l=drive, name=os.path.basename(iso_path)))
+    logger.info(tr("iso.iso_selected"))
+
+    ok = False
+    started = time.time()
+    try:
+        ok, wim_present, copied, written = _copy_iso_tree(
+            drive, letter, logger, cancel, progress, file_cb)
+        if not ok or cancel.is_set():
+            return ok
+        # FAT32'de 4 GB üzeri install.wim kopyalanamadiysa bol (kaynak ISO'dan).
+        if wim_present:
+            try:
+                need_split = not os.path.isfile(f"{letter}:\\sources\\install.wim")
+            except OSError:
+                need_split = False
+            if need_split:
+                _split_wim(drive, letter, logger, cancel)
+        _write_boot_code(letter, logger, cancel)
+        elapsed = max(time.time() - started, 1e-6)
+        logger.ok(tr("iso.iso_done", n=copied, s=human_bytes(written),
+                     t=f"{elapsed:.1f}"))
+        return True
+    finally:
+        _unmount_iso(iso_path)
+        logger.info(tr("iso.umount"))
+        if progress:
+            progress(100.0, tr("copy.progress", p=100))
+
+
+def write_image(iso_path: str, letter: str, logger, cancel,
+                mode: str = "auto", progress: ProgressCb = None,
+                file_cb: FileCb = None) -> bool:
+    """ISO yazimini moda gore yonlendirir: auto | raw | iso (onyuklenebilir)."""
+    if mode == "raw":
+        logger.info(tr("iso.raw_selected"))
+        return write_iso_raw(iso_path, letter, logger, cancel, progress)
+    if mode == "iso":
+        logger.info(tr("iso.iso_selected"))
+        return write_iso_bootable(iso_path, letter, logger, cancel, progress, file_cb)
+    # auto: Windows kurulum imaji ise onyuklenebilir, degilse ham
+    kind = _iso_kind(iso_path)
+    if kind == "windows":
+        logger.info(tr("iso.kind.windows"))
+        ok = write_iso_bootable(iso_path, letter, logger, cancel, progress, file_cb)
+        if not ok and not cancel.is_set():
+            logger.warn(tr("iso.not_bootable"))
+            return write_iso_raw(iso_path, letter, logger, cancel, progress)
+        return ok
+    logger.info(tr("iso.kind.other"))
+    return write_iso_raw(iso_path, letter, logger, cancel, progress)
+
+
 # ---------------------------------------------------------- ZIP işlemleri ---
 
 def zip_folder_to_device(src: str, letter: str, logger, cancel,
@@ -339,7 +686,7 @@ def zip_folder_to_device(src: str, letter: str, logger, cancel,
 
 
 def write_zip_to_device(zip_path: str, letter: str, logger, cancel,
-                        progress: ProgressCb = None) -> bool:
+                        progress: ProgressCb = None, file_cb: FileCb = None) -> bool:
     """Bir .zip arşivinin içeriğini diskin köküne güvenle açar (yazdırır)."""
     zip_path = os.path.abspath(zip_path)
     if not os.path.isfile(zip_path) or not zipfile.is_zipfile(zip_path):
@@ -356,6 +703,17 @@ def write_zip_to_device(zip_path: str, letter: str, logger, cancel,
             written = errors = 0
             started = time.time()
             last_pct = -10
+            total_n = len(infos)
+
+            def emit(name: str, size: int, state: str, speed: float, idx: int) -> None:
+                if not file_cb:
+                    return
+                try:
+                    file_cb(name, size, state, speed, idx, total_n,
+                            human_bytes(total))
+                except Exception:
+                    pass
+
             for info in infos:
                 if cancel.is_set():
                     logger.warn(tr("zip.extract_cancelled"))
@@ -365,9 +723,14 @@ def write_zip_to_device(zip_path: str, letter: str, logger, cancel,
                 if not (low == root_low or low.startswith(root_low + os.sep)):
                     logger.error(tr("zip.traversal", name=info.filename))
                     errors += 1
+                    emit(info.filename, info.file_size, "error", 0.0,
+                         written * 0 + 1)
                     continue
+                emit(info.filename, info.file_size, "active", 0.0, 1)
                 try:
                     os.makedirs(os.path.dirname(target), exist_ok=True)
+                    f_start = time.time()
+                    f_done = 0
                     with zf.open(info) as srcf, open(target, "wb") as outf:
                         while True:
                             block = srcf.read(CHUNK)
@@ -375,10 +738,15 @@ def write_zip_to_device(zip_path: str, letter: str, logger, cancel,
                                 break
                             outf.write(block)
                             written += len(block)
+                            f_done += len(block)
+                    f_elapsed = max(time.time() - f_start, 1e-6)
+                    emit(info.filename, info.file_size, "done",
+                         (f_done / f_elapsed) / MB, 1)
                     if verbose:
                         logger.info(f"  {info.filename}  ({human_bytes(info.file_size)})")
                 except Exception as exc:
                     errors += 1
+                    emit(info.filename, info.file_size, "error", 0.0, 1)
                     logger.error(tr("zip.extract_error", name=info.filename, e=exc))
                 pct = int(written * 100 / total)
                 if pct >= last_pct + 10:

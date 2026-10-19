@@ -7,6 +7,7 @@ import subprocess
 import threading
 import time
 import tkinter as tk
+from datetime import datetime
 from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
@@ -17,25 +18,42 @@ from config_manager import (APP_NAME, APP_VERSION, BASE_DIR, GITHUB_URL,
                             WEBSITE_URL, ConfigManager, resource_path)
 from disk_manager import (Device, DeviceMonitor, fstype_to_option, run_format,
                           run_repair)
-from file_ops import (copy_folder, save_report, write_iso_raw,
-                      write_zip_to_device, zip_folder_to_device)
+from file_ops import (copy_folder, save_report, write_image, write_iso_bootable,
+                      write_iso_raw, write_zip_to_device, zip_folder_to_device)
 from health import CRIT, GOOD, WARN, run_health_test
-from utils import LEVEL_COLORS, Emitter, human_bytes, is_admin
+from utils import (LEVEL_COLORS, Emitter, human_bytes, is_admin,
+                   play_notification)
+import updater
 
 THEME_TO_MODE = {"system": "System", "dark": "Dark", "light": "Light"}
 THEME_KEYS = ("system", "dark", "light")
 
+# Aktarim paneli durum renkleri ve ilgili ceviri anahtarlari — (acik, koyu)
+XF_COLORS = {"active": ("#9A6700", "#d29922"), "done": ("#1A7F37", "#3fb950"),
+             "skip": ("#5F6B76", "#8b949e"), "error": ("#CF222E", "#f85149"),
+             "cancel": ("#CF222E", "#f85149")}
+XF_STATE_KEY = {"active": "xf.state.active", "done": "xf.state.done",
+                "skip": "xf.state.skip", "error": "xf.state.error",
+                "cancel": "xf.state.cancel"}
+XF_ICON = {"active": "▶", "done": "✔", "skip": "»", "error": "✖", "cancel": "✖"}
+
+ISO_MODE_KEYS = ("iso.mode.auto", "iso.mode.raw", "iso.mode.iso")
+ISO_MODE_VALUES = {"iso.mode.auto": "auto", "iso.mode.raw": "raw",
+                   "iso.mode.iso": "iso"}
+
 # Telegram esintili yardimci renkler — (acik, koyu) ciftleri seklinde verilir,
 # boylece koyu/aci temalari arasinda geciste otomatik uyum saglanir.
-MUTED = ("#707579", "#6D7F8F")          # soluk/bilgi metinleri
-LINK = ("#0F87D4", "#52A9F2")           # baglanti metinleri
+# Renkler WCAG kontrast oranina gore secildi (koyu temada soluk metinler
+# okunmazdi; acik temada kirmizi butonlarin beyaz yazisi zayif kalmisti).
+MUTED = ("#5A626B", "#9AA7B4")          # soluk/bilgi metinleri
+LINK = ("#0B6FBF", "#52A9F2")           # baglanti metinleri
 SEC_BTN = ("#E7EBF0", "#2B5278")        # ikincil buton
 SEC_BTN_H = ("#D5DBE0", "#3A6594")
 SEC_BTN_T = ("#17212B", "#E9EDF2")
-DANGER_BTN = ("#E57373", "#8B1E1E")     # tehlikeli buton
-DANGER_BTN_H = ("#E53935", "#A62727")
-CANCEL_BTN = ("#E57373", "#B91C1C")     # iptal butonu
-CANCEL_BTN_H = ("#E53935", "#991B1B")
+DANGER_BTN = ("#C62828", "#8B1E1E")     # tehlikeli buton
+DANGER_BTN_H = ("#B71C1C", "#A62727")
+CANCEL_BTN = ("#C62828", "#B91C1C")     # iptal butonu
+CANCEL_BTN_H = ("#B71C1C", "#991B1B")
 WHITE = ("#FFFFFF", "#FFFFFF")
 
 LED_COLORS = {"unknown": "#6b7280", GOOD: "#22c55e", WARN: "#eab308", CRIT: "#ef4444"}
@@ -44,6 +62,22 @@ HEALTH_KEY = {"unknown": "health.unknown", GOOD: "health.good",
 
 FS_OPTIONS = ["FAT32", "NTFS", "exFAT", "EXT4 (Linux)"]
 NEED_ADMIN = {"format", "repair", "iso"}
+
+# Gunluk (log) konsolu icin tema farkli renkler — (acik, koyu) ciftleri.
+# Koyu tema renkleri acik temada okunmazdi; ikisi de ayri ayri verilir.
+LOG_COLORS = {
+    "DEBUG": ("#5f6b76", "#8b949e"),
+    "INFO":  ("#1f6feb", "#58a6ff"),
+    "OK":    ("#1a7f37", "#3fb950"),
+    "WARN":  ("#9a6700", "#d29922"),
+    "ERROR": ("#cf222e", "#f85149"),
+    "CMD":   ("#8250df", "#bc8cff"),
+}
+
+# Dosya-bazli yazma islemleri: canli aktarim panelini temizler
+XF_TASKS = {"copy", "zip", "iso"}
+# Islem bitisinde kisa bildirim sesi calan gorevler
+SOUND_TASKS = {"format", "repair", "iso", "zip", "copy", "zipfolder", "health"}
 
 
 class LunaciApp(ctk.CTk):
@@ -70,6 +104,14 @@ class LunaciApp(ctk.CTk):
         self._menu_current: str = ""
         self._target_cache: tuple = (None, False, 0.0)
         self._target_checking = False
+        # canli aktarim paneli (FTP tarzi)
+        self._xf_rows: dict = {}
+        self._xf_order: list = []
+        self._xf_max = 3000
+        self._xf_head = (0, 0, "")
+        self._iso_info = None
+        self._update_dialog = None
+        self._update_running = False
 
         ctk.set_appearance_mode(THEME_TO_MODE.get(self.cfg.get("theme"), "System"))
         # Telegram esintili varsayilan tema (assets/theme_lunaci.json)
@@ -81,8 +123,8 @@ class LunaciApp(ctk.CTk):
             pass
 
         self.title(APP_NAME)
-        self.geometry("1120x880")
-        self.minsize(980, 780)
+        self.geometry("1180x940")
+        self.minsize(1040, 820)
 
         self.font_ui = ctk.CTkFont(family="Segoe UI", size=13)
         self.font_small = ctk.CTkFont(family="Segoe UI", size=12)
@@ -102,6 +144,10 @@ class LunaciApp(ctk.CTk):
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         # Beklenmedik Tk geri cagrisi hatalarini sessizce yutma, error.log'a yaz.
         self.report_callback_exception = lambda *a: self._report_callback_error(a[1])
+
+        # Acilista sessiz guncelleme denetimi (arka planda; arayuzu bloklamaz)
+        if self.cfg.get("auto_update_check"):
+            self.after(2500, lambda: self._check_updates(silent=True))
 
     # ----------------------------------------------------------- yardımcı --
 
@@ -123,7 +169,8 @@ class LunaciApp(ctk.CTk):
 
         self.grid_columnconfigure(0, weight=3)
         self.grid_columnconfigure(1, weight=2)
-        self.grid_rowconfigure(3, weight=1)
+        self.grid_rowconfigure(3, weight=3)
+        self.grid_rowconfigure(4, weight=2)
 
         # üst başlık
         header = ctk.CTkFrame(self, fg_color="transparent")
@@ -148,11 +195,16 @@ class LunaciApp(ctk.CTk):
             header, values=["TR", "EN"], command=self._on_language,
             font=self.font_small, width=90)
         self.lang_menu.grid(row=0, column=3, rowspan=2, padx=(0, 8))
+        self.btn_update = ctk.CTkButton(header, text=tr("btn.update"), width=140,
+                                        fg_color=SEC_BTN, hover_color=SEC_BTN_H,
+                                        text_color=SEC_BTN_T,
+                                        command=self._check_updates)
+        self.btn_update.grid(row=0, column=4, rowspan=2, padx=(0, 8))
         self.btn_about = ctk.CTkButton(header, text=tr("btn.about"), width=90,
                                        fg_color=SEC_BTN, hover_color=SEC_BTN_H,
                                        text_color=SEC_BTN_T,
                                        command=self._show_about)
-        self.btn_about.grid(row=0, column=4, rowspan=2)
+        self.btn_about.grid(row=0, column=5, rowspan=2)
 
         # cihaz kartı
         dev_frame = ctk.CTkFrame(self)
@@ -219,21 +271,26 @@ class LunaciApp(ctk.CTk):
         if self.cfg.get("auto_format_before_write"):
             self.autofmt_switch.select()
         self.autofmt_switch.grid(row=4, column=0, sticky="w", padx=12, pady=(2, 2))
-        reports_row = ctk.CTkFrame(tgt_frame, fg_color="transparent")
-        reports_row.grid(row=5, column=0, sticky="ew", padx=12, pady=(2, 12))
-        reports_row.grid_columnconfigure(0, weight=1)
+        options_row = ctk.CTkFrame(tgt_frame, fg_color="transparent")
+        options_row.grid(row=5, column=0, sticky="ew", padx=12, pady=(2, 2))
         self.reports_switch = ctk.CTkSwitch(
-            reports_row, text=tr("switch.reports"),
+            options_row, text=tr("switch.reports"),
             command=self._toggle_reports, font=self.font_small)
         if self.cfg.get("save_reports"):
             self.reports_switch.select()
         self.reports_switch.grid(row=0, column=0, sticky="w")
-        self.btn_reports = ctk.CTkButton(reports_row, text=tr("btn.reports"),
-                                         width=150, fg_color=SEC_BTN,
+        self.sound_switch = ctk.CTkSwitch(
+            options_row, text=tr("switch.sound"),
+            command=self._toggle_sound, font=self.font_small)
+        if self.cfg.get("sound_on_complete"):
+            self.sound_switch.select()
+        self.sound_switch.grid(row=0, column=1, sticky="w", padx=(18, 0))
+        self.btn_reports = ctk.CTkButton(tgt_frame, text=tr("btn.reports"),
+                                         fg_color=SEC_BTN,
                                          hover_color=SEC_BTN_H,
                                          text_color=SEC_BTN_T,
                                          command=self._open_reports)
-        self.btn_reports.grid(row=0, column=1, sticky="e")
+        self.btn_reports.grid(row=6, column=0, sticky="ew", padx=12, pady=(2, 12))
 
         # biçimlendirme
         fmt_frame = ctk.CTkFrame(self)
@@ -318,9 +375,45 @@ class LunaciApp(ctk.CTk):
         self.log_box.grid(row=1, column=0, columnspan=3, sticky="nsew",
                           padx=12, pady=(0, 12))
 
+        # canlı aktarım paneli (FTP programlarındaki dosya listesi gibi)
+        xf_frame = ctk.CTkFrame(self)
+        xf_frame.grid(row=4, column=0, columnspan=2, sticky="nsew",
+                      padx=18, pady=(0, 6))
+        xf_frame.grid_columnconfigure(0, weight=1)
+        xf_frame.grid_rowconfigure(3, weight=1)
+        self.xf_section = ctk.CTkLabel(xf_frame, text=tr("xf.section"),
+                                       font=self.font_small, text_color=MUTED)
+        self.xf_section.grid(row=0, column=0, sticky="w", padx=12, pady=(8, 2))
+        head = ctk.CTkFrame(xf_frame, fg_color="transparent")
+        head.grid(row=1, column=0, sticky="ew", padx=12)
+        head.grid_columnconfigure(0, weight=1)
+        self.xf_headers = {}
+        for col, key in enumerate(("xf.col.file", "xf.col.status", "xf.col.size",
+                                   "xf.col.speed")):
+            lbl = ctk.CTkLabel(head, text=tr(key), font=self.font_small,
+                               text_color=MUTED,
+                               anchor="w" if col == 0 else "e")
+            lbl.grid(row=0, column=col, sticky="ew",
+                     padx=(0, 10) if col < 3 else 0)
+            self.xf_headers[key] = lbl
+        self.xf_progress = ctk.CTkProgressBar(xf_frame)
+        self.xf_progress.set(0)
+        self.xf_progress.grid(row=2, column=0, sticky="ew",
+                              padx=12, pady=(2, 0))
+        self.xf_body = ctk.CTkTextbox(xf_frame, font=self.font_mono, height=110,
+                                      wrap="none", activate_scrollbars=True)
+        self.xf_body.grid(row=3, column=0, sticky="nsew",
+                          padx=12, pady=(4, 0))
+        self.xf_summary = ctk.CTkLabel(xf_frame, text=tr("xf.empty"),
+                                       font=self.font_small, text_color=MUTED,
+                                       anchor="w")
+        self.xf_summary.grid(row=4, column=0, sticky="ew",
+                             padx=12, pady=(2, 10))
+        self._init_xf_tags()
+
         # durum çubuğu
         status = ctk.CTkFrame(self, fg_color="transparent")
-        status.grid(row=4, column=0, columnspan=2, sticky="ew", padx=18, pady=(0, 12))
+        status.grid(row=5, column=0, columnspan=2, sticky="ew", padx=18, pady=(0, 12))
         status.grid_columnconfigure(1, weight=1)
         self.status_label = ctk.CTkLabel(status, text=tr("status.ready"), anchor="w",
                                          font=self.font_small)
@@ -350,6 +443,7 @@ class LunaciApp(ctk.CTk):
         self.theme_menu.set(self.theme_map.get(self.cfg.get("theme"), tr("theme.system")))
         self.lang_menu.set((self.cfg.get("language") or "tr").upper())
         self.btn_about.configure(text=tr("btn.about"))
+        self.btn_update.configure(text=tr("btn.update"))
         self.dev_section.configure(text=tr("dev.section"))
         self.folder_section.configure(text=tr("folder.section"))
         self.btn_browse.configure(text=tr("btn.browse"))
@@ -357,6 +451,7 @@ class LunaciApp(ctk.CTk):
         self.btn_zipfolder.configure(text=tr("btn.zip_folder"))
         self.autofmt_switch.configure(text=tr("switch.autofmt"))
         self.reports_switch.configure(text=tr("switch.reports"))
+        self.sound_switch.configure(text=tr("switch.sound"))
         self.btn_reports.configure(text=tr("btn.reports"))
         self.fmt_section.configure(text=tr("fmt.section"))
         self.label_caption.configure(text=tr("fmt.label"))
@@ -371,6 +466,11 @@ class LunaciApp(ctk.CTk):
         self.log_section.configure(text=tr("log.section"))
         self.btn_clear.configure(text=tr("btn.clear"))
         self.btn_save_log.configure(text=tr("btn.save"))
+        self.xf_section.configure(text=tr("xf.section"))
+        for key, lbl in self.xf_headers.items():
+            lbl.configure(text=tr(key))
+        if not self._xf_order:
+            self.xf_summary.configure(text=tr("xf.empty"))
         self.btn_health.configure(text=tr("btn.health"))
         self.cancel_btn.configure(text=tr("btn.cancel"))
         if not self.busy:
@@ -514,8 +614,12 @@ class LunaciApp(ctk.CTk):
                     elif kind == "progress":
                         self._on_progress(payload[0],
                                           payload[1] if len(payload) > 1 else None)
+                    elif kind == "file":
+                        self._on_file(*payload)
                     elif kind == "target_ok":
                         self._on_target_ok(payload[0], payload[1])
+                    elif kind == "update_check":
+                        self._on_update_check(*payload)
                     elif kind == "task_done":
                         self._on_task_done(*payload)
                 except Exception as exc:
@@ -595,6 +699,80 @@ class LunaciApp(ctk.CTk):
         self._update_device_card()
         self._refresh_actions()
 
+    # --------------------------------------------------- canlı aktarım ------
+
+    def _xf_color(self, state: str) -> str:
+        light, dark = XF_COLORS.get(state, ("#33383d", "#c9d1d9"))
+        return dark if ctk.get_appearance_mode() == "Dark" else light
+
+    def _init_xf_tags(self) -> None:
+        inner = getattr(self.xf_body, "_textbox", None)
+        if inner is None:
+            return
+        for state in XF_COLORS:
+            try:
+                inner.tag_config(f"xf_{state}", foreground=self._xf_color(state))
+            except Exception:
+                pass
+        try:
+            inner.tag_config("xf_path",
+                             foreground="#8b949e"
+                             if ctk.get_appearance_mode() == "Dark"
+                             else "#5F6B76")
+        except Exception:
+            pass
+
+    def _xf_reset(self) -> None:
+        """Aktarım panelini temizler (yeni görev başında çağrılır)."""
+        self._xf_rows = {}
+        self._xf_order = []
+        self._xf_head = (0, 0, "")
+        self._iso_info = None
+        self.xf_progress.set(0)
+        try:
+            self.xf_body.delete("1.0", "end")
+        except Exception:
+            pass
+        self.xf_summary.configure(text=tr("xf.empty"))
+
+    def _on_file(self, name, size, state, speed, done, total, summary) -> None:
+        """Dosya aktarım olayı (ana thread'de çalışır)."""
+        key = str(name)
+        row = self._xf_rows.get(key)
+        line = self._xf_line(key, size, state, speed)
+        try:
+            if row is None:
+                if len(self._xf_order) >= self._xf_max:
+                    return
+                self.xf_body.insert("end", line + "\n", f"xf_{state}")
+                self._xf_rows[key] = {"index": int(self.xf_body.index("end-1c")
+                                                   .split(".")[0])}
+                self._xf_order.append(key)
+            else:
+                idx = row["index"]
+                self.xf_body.delete(f"{idx}.0", f"{idx}.end")
+                self.xf_body.insert(f"{idx}.0", line, f"xf_{state}")
+            if state in ("active", "done", "error"):
+                self.xf_body.see("end")
+        except Exception as exc:
+            self._report_callback_error(exc)
+        self._xf_head = (done, total, summary)
+        self._xf_update_summary()
+
+    def _xf_line(self, name, size, state, speed) -> str:
+        icon = XF_ICON.get(state, "·")
+        label = tr(XF_STATE_KEY.get(state, "xf.state.done"))
+        text = name if len(name) <= 64 else "…" + name[-63:]
+        sp = f"{speed:.1f} MB/s" if speed else ""
+        return f"{icon}  {text:<64}  {label:<11} {human_bytes(size):>10}  {sp:>12}"
+
+    def _xf_update_summary(self) -> None:
+        done, total, summary = self._xf_head
+        if not total:
+            return
+        text = tr("xf.summary", d=done, t=total, s=summary or "")
+        self.xf_summary.configure(text=text.strip())
+
     def _on_progress(self, pct, text: str | None = None) -> None:
         """Ilerleme cubugunu gunceller. Bozuk/eksik deger gelse bile arayuz
         ASLA hata vermemeli (beklenmeyen tur degerleri sessizce yutulur)."""
@@ -611,6 +789,11 @@ class LunaciApp(ctk.CTk):
                     self.prog.configure(mode="determinate")
                     self._indeterminate = False
                 self.prog.set(max(0.0, min(1.0, float(pct) / 100.0)))
+        except (TypeError, ValueError, tk.TclError):
+            pass
+        try:
+            if pct is not None:
+                self.xf_progress.set(max(0.0, min(1.0, float(pct) / 100.0)))
         except (TypeError, ValueError, tk.TclError):
             pass
         if text:
@@ -643,13 +826,7 @@ class LunaciApp(ctk.CTk):
                     parts.append(f"[{r.time_str}] [{r.level:<5}] {r.message}\n")
                     j += 1
                 chunk = "".join(parts)
-                if level not in self._log_tags:
-                    try:
-                        inner.tag_config(level,
-                                         foreground=LEVEL_COLORS.get(level, "#c9d1d9"))
-                    except Exception:
-                        pass
-                    self._log_tags.add(level)
+                self._ensure_log_tag(level, inner)
                 try:
                     inner.insert("end", chunk, level)
                 except Exception:
@@ -669,6 +846,31 @@ class LunaciApp(ctk.CTk):
             self.log_box.see("end")
         except Exception:
             pass
+
+    def _ensure_log_tag(self, level: str, inner) -> None:
+        """Gunluk etiketini (tag) mevcut temaya gore ayarlar."""
+        if level in self._log_tags:
+            return
+        try:
+            inner.tag_config(level, foreground=self._log_color(level))
+        except Exception:
+            pass
+        self._log_tags.add(level)
+
+    def _log_color(self, level: str) -> str:
+        light, dark = LOG_COLORS.get(level, ("#33383d", "#c9d1d9"))
+        return dark if ctk.get_appearance_mode() == "Dark" else light
+
+    def _refresh_log_tags(self) -> None:
+        """Tema degisince mevcut gunluk etiket renklerini yeniler."""
+        inner = getattr(self.log_box, "_textbox", None)
+        if inner is None:
+            return
+        for level in list(self._log_tags):
+            try:
+                inner.tag_config(level, foreground=self._log_color(level))
+            except Exception:
+                pass
 
     def _insert_log(self, rec) -> None:
         """Geriye dönük uyumluluk için tek kayıt ekler."""
@@ -692,7 +894,16 @@ class LunaciApp(ctk.CTk):
         self.cancel_event.clear()
         logger = Emitter(self.q.put, task=key)
         self._set_status(status_text)
-        self._on_progress(None, status_text)
+        try:
+            self.prog.stop()
+            self.prog.configure(mode="determinate")
+            self._indeterminate = False
+            self.prog.set(0)
+            self.xf_progress.set(0)
+        except Exception:
+            pass
+        if key in XF_TASKS:
+            self._xf_reset()
         self.cancel_btn.configure(state="normal" if cancellable else "disabled")
         self._refresh_actions()
 
@@ -753,6 +964,10 @@ class LunaciApp(ctk.CTk):
 
         if ok and key in ("format", "repair", "iso", "zip", "copy", "zipfolder"):
             self.monitor.request_poll(force=True)
+        if self.cfg.get("sound_on_complete") and key in SOUND_TASKS:
+            play_notification(ok)
+        if key == "update_download":
+            self._complete_update_download(ok, extra)
 
     def _cancel_task(self) -> None:
         if self.busy:
@@ -777,6 +992,9 @@ class LunaciApp(ctk.CTk):
 
     def _toggle_autofmt(self) -> None:
         self.cfg.set("auto_format_before_write", bool(self.autofmt_switch.get()))
+
+    def _toggle_sound(self) -> None:
+        self.cfg.set("sound_on_complete", bool(self.sound_switch.get()))
 
     def autofmt_enabled(self) -> bool:
         return bool(self.autofmt_switch.get())
@@ -854,6 +1072,10 @@ class LunaciApp(ctk.CTk):
         key = self.theme_map.get(choice, "system")
         ctk.set_appearance_mode(THEME_TO_MODE.get(key, "System"))
         self.cfg.set("theme", key)
+        # Etiketli gunluk satirlari eski temanin rengini korur; yenile.
+        self.after(50, self._refresh_log_tags)
+        # Aktarim paneli satirlari da eski temanin rengini korur; yenile.
+        self.after(50, self._init_xf_tags)
 
     def _on_language(self, choice: str) -> None:
         lang = "en" if choice == "EN" else "tr"
@@ -882,14 +1104,17 @@ class LunaciApp(ctk.CTk):
         self._log("INFO", tr("ui.copy_engine", l=dev.letter, e=engine))
         fmt_opts = self._fmt_opts_snapshot()   # ANA iş parçacığında oku
 
+        def file_emit(name, size, state, speed, done, total, summary):
+            self.q.put(("file", name, size, state, speed, done, total, summary))
+
         def task(logger):
             if not self._preflight_format(logger, dev, fmt_opts):
                 return False, None
             return copy_folder(src, dev.letter, logger, self.cancel_event,
-                               engine=engine, progress=self._progress_emit), None
+                               engine=engine, progress=self._progress_emit,
+                               file_cb=file_emit), None
 
         self._start_task("copy", tr("task.copy", l=dev.letter), task, cancellable=True)
-
     def _do_zipfolder(self) -> None:
         dev = self.active_device()
         src = (self.target_var.get() or "").strip()
@@ -952,6 +1177,51 @@ class LunaciApp(ctk.CTk):
         self._start_task("repair", tr("task.repair", l=dev.letter), task,
                          cancellable=False)
 
+    def _choose_iso_mode(self, path: str, size: int, dev: Device) -> str | None:
+        """ISO yazım modunu seçtiren pencere. ``None`` = iptal."""
+        win = ctk.CTkToplevel(self)
+        win.title(tr("iso.dlg.title"))
+        win.geometry("480x340")
+        win.resizable(False, False)
+        win.transient(self)
+        win.grab_set()
+
+        ctk.CTkLabel(win, text=os.path.basename(path),
+                     font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"),
+                     wraplength=420).pack(pady=(18, 2))
+        ctk.CTkLabel(win, text=f"{human_bytes(size)}  ·  {dev.letter}: ({dev.name})",
+                     text_color=MUTED, font=self.font_small).pack()
+
+        values = [tr(k) for k in ISO_MODE_KEYS]
+        mode_map = {tr(k): ISO_MODE_VALUES[k] for k in ISO_MODE_KEYS}
+        seg = ctk.CTkSegmentedButton(win, values=values, width=420,
+                                     font=self.font_small)
+        seg.set(values[0])
+        seg.pack(pady=(18, 6))
+        ctk.CTkLabel(win, text=tr("iso.mode.hint"), text_color=MUTED,
+                     font=self.font_small, wraplength=420, justify="left").pack(
+            padx=18, anchor="w")
+        if self.autofmt_enabled():
+            ctk.CTkLabel(win, text=tr("dlg.will_format"), text_color="#d29922",
+                         font=self.font_small, wraplength=420,
+                         justify="left").pack(padx=18, pady=(8, 0), anchor="w")
+
+        chosen = {}
+
+        def ok():
+            chosen["mode"] = mode_map.get(seg.get(), "auto")
+            win.destroy()
+
+        row = ctk.CTkFrame(win, fg_color="transparent")
+        row.pack(side="bottom", pady=14)
+        ctk.CTkButton(row, text=tr("iso.btn.write"), width=110, command=ok).pack(
+            side="left", padx=6)
+        ctk.CTkButton(row, text=tr("btn.cancel"), width=90,
+                      fg_color=CANCEL_BTN, hover_color=CANCEL_BTN_H,
+                      command=win.destroy).pack(side="left", padx=6)
+        win.wait_window()
+        return chosen.get("mode")
+
     def _do_iso(self) -> None:
         dev = self.active_device()
         if not dev:
@@ -961,7 +1231,13 @@ class LunaciApp(ctk.CTk):
             filetypes=[(tr("file.iso"), "*.iso"), (tr("file.all"), "*.*")])
         if not path:
             return
-        size = os.path.getsize(path)
+        try:
+            size = os.path.getsize(path)
+        except OSError:
+            size = 0
+        mode = self._choose_iso_mode(path, size, dev)
+        if not mode:
+            return
         if not messagebox.askyesno(
                 tr("dlg.iso.title"),
                 tr("dlg.iso.body", name=os.path.basename(path),
@@ -972,11 +1248,15 @@ class LunaciApp(ctk.CTk):
 
         fmt_opts = self._fmt_opts_snapshot()   # ANA iş parçacığında oku
 
+        def file_emit(name, size_bytes, state, speed, done, total, summary):
+            self.q.put(("file", name, size_bytes, state, speed, done, total, summary))
+
         def task(logger):
             if not self._preflight_format(logger, dev, fmt_opts):
                 return False, None
-            return write_iso_raw(path, dev.letter, logger, self.cancel_event,
-                                 progress=self._progress_emit), None
+            return write_image(path, dev.letter, logger, self.cancel_event,
+                               mode=mode, progress=self._progress_emit,
+                               file_cb=file_emit), None
 
         self._start_task("iso", tr("task.iso", l=dev.letter), task, cancellable=True)
 
@@ -999,11 +1279,15 @@ class LunaciApp(ctk.CTk):
 
         fmt_opts = self._fmt_opts_snapshot()   # ANA iş parçacığında oku
 
+        def file_emit(name, size, state, speed, done, total, summary):
+            self.q.put(("file", name, size, state, speed, done, total, summary))
+
         def task(logger):
             if not self._preflight_format(logger, dev, fmt_opts):
                 return False, None
             return write_zip_to_device(path, dev.letter, logger, self.cancel_event,
-                                       progress=self._progress_emit), None
+                                       progress=self._progress_emit,
+                                       file_cb=file_emit), None
 
         self._start_task("zip", tr("task.zip", l=dev.letter), task, cancellable=True)
 
@@ -1073,16 +1357,102 @@ class LunaciApp(ctk.CTk):
         link(WEBSITE_URL, WEBSITE_URL)
         link(f"GitHub → {GITHUB_URL}", GITHUB_URL)
 
+        ctk.CTkButton(win, text=tr("btn.update"),
+                      fg_color=SEC_BTN, hover_color=SEC_BTN_H,
+                      text_color=SEC_BTN_T,
+                      command=lambda: (win.destroy(), self._check_updates())).pack(
+            side="bottom", pady=(2, 14))
         ctk.CTkButton(win, text="✕", width=40, fg_color=DANGER_BTN,
                       hover_color=DANGER_BTN_H, text_color=WHITE,
                       command=win.destroy).pack(
             side="bottom", pady=14)
+
+    # ------------------------------------------------------- güncelleme -----
+
+    def _check_updates(self, silent: bool = False) -> None:
+        """GitHub'daki en son sürümü arka planda denetler (arayüzü bloklamaz)."""
+        if self._update_running:
+            return
+        self._update_running = True
+        self._set_status(tr("update.checking"))
+        if not silent:
+            self._log("INFO", tr("update.checking"))
+
+        def worker() -> None:
+            info, err = None, ""
+            try:
+                info = updater.check_for_update()
+            except Exception as exc:
+                err = str(exc)
+            try:
+                self.q.put(("update_check", info, err, silent))
+            except Exception:
+                pass
+
+        threading.Thread(target=worker, daemon=True, name="lunaci-update").start()
+
+    def _on_update_check(self, info, err: str, silent: bool) -> None:
+        """Guncelleme denetimi sonucu (ana thread'de calisir)."""
+        self._update_running = False
+        if self.busy is None:
+            self._set_status(tr("status.ready"))
+        if err:
+            if not silent:
+                self._log("ERROR", tr("update.error", e=err))
+            return
+        if not info or not updater.is_newer(info.version):
+            if not silent:
+                self._log("OK", tr("update.latest", cur=APP_VERSION))
+            return
+        self._log("OK", tr("update.found", new=info.version, cur=APP_VERSION,
+                           notes=tr("update.notes_empty")))
+        if not updater.updater_supported() or not info.has_asset:
+            self._log("WARN", tr("update.source_only"))
+            try:
+                import webbrowser
+                webbrowser.open(info.page_url)
+            except Exception:
+                pass
+            return
+        if not messagebox.askyesno(
+                tr("btn.update"),
+                tr("update.found", new=info.version, cur=APP_VERSION,
+                   notes=(info.notes or "").strip() or tr("update.notes_empty"))):
+            return
+        self._start_update_download(info)
+
+    def _start_update_download(self, info) -> None:
+        if self.busy:
+            self._log("WARN", tr("ui.busy", k=self.busy))
+            return
+        self._log("INFO", tr("update.downloading", p=info.asset_name))
+
+        def task(logger):
+            script = updater.download_update(info, logger,
+                                             progress=self._progress_emit)
+            return True, script
+
+        self._start_task("update_download", tr("update.downloading", p=""),
+                         task, cancellable=True)
+
+    def _complete_update_download(self, ok: bool, script) -> None:
+        if not ok or not script:
+            return
+        self._log("OK", tr("update.downloaded"))
+        if not messagebox.askyesno(tr("btn.update"), tr("update.downloaded")):
+            return
+        if updater.launch_updater(script):
+            self._log("OK", tr("update.applied"))
+            self.after(600, self._on_close)
+        else:
+            self._log("ERROR", tr("update.error", e="launch"))
 
     # ------------------------------------------------------- konsol UI ------
 
     def _clear_log(self) -> None:
         self.log_box.delete("1.0", "end")
         self._log_lines = 0
+        self._xf_reset()
 
     def _save_console(self) -> None:
         text = self.log_box.get("1.0", "end")

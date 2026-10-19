@@ -51,7 +51,7 @@ def check(name: str, cond: bool, detail="") -> bool:
 
 # ------------------------------------------------------------------ 1) derle
 MODULES = ["main.py", "app.py", "i18n.py", "utils.py", "disk_manager.py",
-           "file_ops.py", "health.py", "config_manager.py"]
+           "file_ops.py", "health.py", "config_manager.py", "updater.py"]
 print("\n== 1. Derleme ==")
 for f in MODULES:
     path = os.path.join(ROOT, f)
@@ -233,6 +233,8 @@ for i in range(1200):
 
 subst_ok = False
 try:
+    # onceki calistirmadan kalmis olabilecek Z: eslesmesini temizle
+    subprocess.run(["subst", "Z:", "/D"], capture_output=True, text=True)
     r = subprocess.run(["subst", "Z:", subst_target], capture_output=True, text=True)
     subst_ok = r.returncode == 0
 except Exception:  # noqa: BLE001
@@ -245,9 +247,11 @@ if subst_ok:
         log_items = []
         plog = Emitter(lambda it: log_items.append(it), task="copy")
         progress_calls = []
+        file_events = []
         t0 = time.time()
         ok = file_ops.copy_folder(src, "Z", plog, cancel,
-                                  progress=lambda p, t: progress_calls.append(p))
+                                  progress=lambda p, t: progress_calls.append(p),
+                                  file_cb=lambda *a: file_events.append(a))
         dt = time.time() - t0
         copied = sum(1 for _r, _d, fs in os.walk(subst_target) for _ in fs)
         check("copy_folder basarili", ok, f"ok={ok}")
@@ -257,6 +261,12 @@ if subst_ok:
               len(progress_calls))
         check("copy_folder log tasmasi yok (<300 UI olayi)", len(log_items) < 300,
               len(log_items))
+        check("copy_folder canli aktarim olaylari geldi (file_cb)",
+              len(file_events) > 0, len(file_events))
+        check("file_cb olay durumlari gecerli",
+              all(e[2] in ("active", "done", "skip", "error", "cancel")
+                  for e in file_events),
+              sorted({e[2] for e in file_events}))
     except Exception as exc:  # noqa: BLE001
         check("copy_folder", False, exc)
 
@@ -281,6 +291,60 @@ if subst_ok:
         check("zip islemleri", False, exc)
     finally:
         subprocess.run(["subst", "Z:", "/D"], capture_output=True, text=True)
+
+# ------------------------------------------ 8b) guncelleme / ISO / ses ----
+print("\n== 8b. Guncelleme denetimi (surum karsilastirma) ==")
+try:
+    import updater
+    check("surum karsilastirma (v1.3.0 > 1.2.0)",
+          updater.is_newer("v1.3.0", "1.2.0"))
+    check("surum karsilastirma (1.2.0 == 1.2.0 yeni degil)",
+          not updater.is_newer("1.2.0", "1.2.0"))
+    check("surum karsilastirma (v1.2.10 > 1.2.9)",
+          updater.is_newer("v1.2.10", "1.2.9"))
+    check("surum ayristirma (v2.0.1 -> (2,0,1))",
+          updater._version_tuple("v2.0.1") == (2, 0, 1))
+    check("kaynak modda otomatik guncelleme kapali",
+          updater.updater_supported() is False)
+    check("UpdateInfo bos -> has_asset False",
+          updater.UpdateInfo().has_asset is False)
+    check("guncelleme API adresi GitHub deposunu gosteriyor",
+          "cengizkemec/lunaci-smart-usb-sd-utility" in updater.API_LATEST)
+except Exception as exc:  # noqa: BLE001
+    check("updater testleri", False, exc)
+
+print("\n== 8c. ISO yazim modu tespiti ==")
+try:
+    iso_kind = file_ops._iso_kind
+    check("gecersiz dosya -> unknown",
+          iso_kind(os.path.join(tmp_root, "yok.bin")) == "unknown")
+    fake = os.path.join(tmp_root, "fake.iso")
+    with open(fake, "wb") as fh:
+        fh.write(b"\0" * (16 * 2048))
+        fh.write(b"CD001")
+        fh.write(b"\0" * (32 * 1024))
+    check("gecerli ISO9660 PVD -> other", iso_kind(fake) == "other")
+    win = os.path.join(tmp_root, "win.iso")
+    with open(win, "wb") as fh:
+        fh.write(b"\0" * (16 * 2048))
+        fh.write(b"CD001")
+        fh.write(b"SOURCES/INSTALL.WIM")
+        fh.write(b"\0" * (32 * 1024))
+    check("install.wim iceren imaj -> windows", iso_kind(win) == "windows")
+    check("write_image fonksiyonu mevcut", callable(file_ops.write_image))
+    check("write_iso_bootable fonksiyonu mevcut",
+          callable(file_ops.write_iso_bootable))
+except Exception as exc:  # noqa: BLE001
+    check("ISO tespit testleri", False, exc)
+
+print("\n== 8d. Bildirim sesi ==")
+try:
+    from utils import play_notification
+    play_notification(True)
+    play_notification(False)
+    check("play_notification hata vermedi", True)
+except Exception as exc:  # noqa: BLE001
+    check("play_notification", False, exc)
 
 # ------------------------------------------------------------------ 9) AST
 print("\n== 9. AST: gorev bloklari Tk'ya dokunmuyor ==")
