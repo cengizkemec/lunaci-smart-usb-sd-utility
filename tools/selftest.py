@@ -435,6 +435,19 @@ try:
     except Exception as exc:  # noqa: BLE001
         check("birlesik konsol testi", False, exc)
 
+    # Guncelleme onayi: uzun yayin notlari messagebox ile gosterilirse pencere
+    # ekrandan tasip Evet dugmesi erisilemez olur. Onay artik kaydirilabilir
+    # ozel pencerede olmali.
+    try:
+        import inspect
+        src = inspect.getsource(LunaciApp._on_update_check)
+        check("guncelleme onayi messagebox kullanmiyor",
+              "askyesno" not in src)
+        check("kaydirilabilir guncelleme penceresi var",
+              hasattr(LunaciApp, "_ask_update_dialog"))
+    except Exception as exc:  # noqa: BLE001
+        check("guncelleme onayi testi", False, exc)
+
     # Ilerleme cubugu: diskpart'in kullandigi "belirsiz mod" + bozuk deger
     # hicbir sekilde hata firlatmamali (CTk start() argumansizdir).
     try:

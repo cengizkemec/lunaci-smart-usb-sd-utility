@@ -12,7 +12,7 @@ import sys
 import threading
 
 APP_NAME = "Lunaci Smart USB & SD Card Utility"
-APP_VERSION = "1.3.1"
+APP_VERSION = "1.3.2"
 GITHUB_URL = "https://github.com/cengizkemec/lunaci-smart-usb-sd-utility"
 WEBSITE_URL = "https://cengizkemec.com.tr/"
 

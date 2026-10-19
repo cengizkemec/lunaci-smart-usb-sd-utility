@@ -1,11 +1,8 @@
-# Lunaci Smart USB & SD Card Utility v1.3.1
+# Lunaci Smart USB & SD Card Utility v1.3.2
 
 **Release date:** 2026-10-19
 
-This is a UI cleanup release. The live transfer list and the log console were split
-across two panels and the screen showed two progress bars, which looked cluttered and
-hard to follow. They are now merged into a **single console**, there is **one** progress
-bar, and the dark-theme buttons are readable again.
+A small follow-up fix for v1.3.1.
 
 ## Download
 
@@ -17,43 +14,34 @@ bar, and the dark-theme buttons are readable again.
 > Administrator rights are requested automatically (UAC) on startup, because
 > `diskpart`, `chkdsk`, ISO mounting and raw ISO writing require elevation.
 
-## What's new in 1.3.1
+## What's new in 1.3.2
 
-### One console instead of two panels
+### Fixed: the update prompt could not be confirmed
 
-The separate **Live Transfer** panel and the **Log** panel are gone. Everything now
-happens in a single console:
+When a new version was found, the confirmation window printed the **entire** release
+notes as its message. With longer notes the dialog grew taller than the screen, so the
+**Yes / Install** button was pushed off-screen and could not be clicked — the update
+could never be started from inside the app.
 
-- Time-stamped log records and the live file list share one area — no more glancing
-  between two boxes.
-- File rows always form one tidy block at the **bottom**; new log lines flow in **above**
-  them, so the two kinds of information never interleave and the list never looks
-  scrambled.
-- A file's row is updated **in place** as it moves (active → done / skipped / failed /
-  cancelled), so the list stays compact instead of growing one line per event.
-- The console fills all remaining window height and is horizontally scrollable, with a
-  narrower, cleaner layout overall.
+The prompt is now a proper window:
 
-### A single progress bar
+- A fixed heading shows the new and current version.
+- The release notes are shown in their own **scrollable** area, so any length fits.
+- **Download and Install** / **Later** buttons stay pinned at the bottom and are always
+  clickable; `Enter` confirms and `Esc` closes.
+- The window is centred and clamped to the screen, and the second "apply the update
+  now?" prompt is worded as a clear question.
 
-The duplicate file-transfer progress bar was removed. The status bar now shows **one**
-progress bar for the whole job, alongside the `done/total · size` summary. (The bar in
-the device card is the device **occupancy** indicator, a different thing.)
+## Everything from 1.3.1
 
-### Readable buttons in dark mode
-
-Button text was rendering near-black on the accent colour, which was hard to read:
-
-- The accent colour was deepened (`#5288C1` → `#3B6FA8` dark / `#3F76B0` light) so
-  white text reaches **≥ 4.5:1** contrast (WCAG AA) in both themes.
-- All accent buttons (Health, Browse, Copy, Quick Format, ISO Write, the ISO dialog's
-  write button, and the device dropdown) now use white text explicitly.
-- The red **Cancel** button in the ISO dialog no longer inherits dark text on dark red.
-- The selected segment of the file-system / mode pickers matches the new accent colour.
+- **One console instead of two panels** — the live file list and the timestamped log
+  share a single console; file rows stay as one block at the bottom while log lines flow
+  in above them.
+- **A single progress bar** — the duplicate transfer progress bar was removed.
+- **Readable buttons in dark mode** — the accent colour was deepened so white text
+  reaches WCAG AA (≥ 4.5:1) in both themes, and every accent button now uses white text.
 
 ## Everything from 1.3.0
-
-This release builds on v1.3.0, which added:
 
 - **Live transfer console** (now merged — see above).
 - **Bootable ISO writing** (Rufus-style): automatic mode detection, Windows `install.wim`

@@ -1516,8 +1516,7 @@ class LunaciApp(ctk.CTk):
             if not silent:
                 self._log("OK", tr("update.latest", cur=APP_VERSION))
             return
-        self._log("OK", tr("update.found", new=info.version, cur=APP_VERSION,
-                           notes=tr("update.notes_empty")))
+        self._log("OK", tr("update.found", new=info.version, cur=APP_VERSION))
         if not updater.updater_supported() or not info.has_asset:
             self._log("WARN", tr("update.source_only"))
             try:
@@ -1526,12 +1525,77 @@ class LunaciApp(ctk.CTk):
             except Exception:
                 pass
             return
-        if not messagebox.askyesno(
-                tr("btn.update"),
-                tr("update.found", new=info.version, cur=APP_VERSION,
-                   notes=(info.notes or "").strip() or tr("update.notes_empty"))):
+        if not self._ask_update_dialog(info):
             return
         self._start_update_download(info)
+
+    def _ask_update_dialog(self, info) -> bool:
+        """Guncelleme onay penceresi (kaydirilabilir surum notlari).
+
+        Eski kod ``messagebox.askyesno`` ile yayin notlarinin TAMAMINI mesaj
+        olarak gosteriyordu; notlar uzun olunca pencere ekrandan tasip Evet
+        dugmesi erisilemez hale geliyordu. Bu pencerede baslik sabit, notlar
+        kendi icinde kayar ve butonlar her zaman altta gorunur.
+        """
+        win = ctk.CTkToplevel(self)
+        win.title(tr("update.dlg_title"))
+        win.transient(self)
+        win.resizable(True, True)
+        win.minsize(480, 360)
+        result = {"ok": False}
+
+        ctk.CTkLabel(win,
+                     text=tr("update.dlg_heading", new=info.version,
+                             cur=APP_VERSION),
+                     font=ctk.CTkFont(family="Segoe UI", size=15,
+                                      weight="bold"),
+                     justify="left", anchor="w", wraplength=520).pack(
+            fill="x", padx=18, pady=(16, 4))
+        ctk.CTkLabel(win, text=tr("update.notes_title"),
+                     font=self.font_small, text_color=MUTED, anchor="w").pack(
+            fill="x", padx=18, pady=(6, 2))
+
+        box = ctk.CTkTextbox(win, wrap="word", font=self.font_small)
+        box.pack(fill="both", expand=True, padx=18, pady=(0, 10))
+        notes = (info.notes or "").strip() or tr("update.notes_empty")
+        box.insert("1.0", notes)
+        try:
+            box.configure(state="disabled")
+        except Exception:
+            pass
+
+        # Butonlar pencerenin en altina sabitlenir; notlar uzasa da gorunur.
+        btns = ctk.CTkFrame(win, fg_color="transparent")
+        btns.pack(side="bottom", fill="x", padx=18, pady=(0, 16))
+
+        def _install() -> None:
+            result["ok"] = True
+            win.destroy()
+
+        ctk.CTkButton(btns, text=tr("update.btn_install"), width=170,
+                      fg_color=ACCENT, hover_color=ACCENT_H, text_color=WHITE,
+                      command=_install).pack(side="right", padx=(8, 0))
+        ctk.CTkButton(btns, text=tr("update.btn_later"), width=110,
+                      fg_color=SEC_BTN, hover_color=SEC_BTN_H,
+                      text_color=SEC_BTN_T, command=win.destroy).pack(
+            side="right")
+
+        win.bind("<Escape>", lambda e: win.destroy())
+        win.bind("<Return>", lambda e: _install())
+        win.update_idletasks()
+        # Ekranin disina tasmasin: makul bir boyut sec ve ortala.
+        w, h = 600, 460
+        try:
+            sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
+            h = min(h, max(320, sh - 200))
+            x = max(0, (sw - w) // 2)
+            y = max(0, (sh - h) // 3)
+            win.geometry(f"{w}x{h}+{x}+{y}")
+        except Exception:
+            win.geometry(f"{w}x{h}")
+        win.grab_set()
+        win.wait_window()
+        return result["ok"]
 
     def _start_update_download(self, info) -> None:
         if self.busy:
@@ -1551,7 +1615,8 @@ class LunaciApp(ctk.CTk):
         if not ok or not script:
             return
         self._log("OK", tr("update.downloaded"))
-        if not messagebox.askyesno(tr("btn.update"), tr("update.downloaded")):
+        if not messagebox.askyesno(tr("update.dlg_title"),
+                                   tr("update.apply_prompt")):
             return
         if updater.launch_updater(script):
             self._log("OK", tr("update.applied"))
