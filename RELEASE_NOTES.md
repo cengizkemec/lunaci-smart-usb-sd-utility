@@ -1,8 +1,8 @@
-# Lunaci Smart USB & SD Card Utility v1.3.2
+# Lunaci Smart USB & SD Card Utility v1.3.3
 
-**Release date:** 2026-10-19
+**Release date:** 2026-10-23
 
-A small follow-up fix for v1.3.1.
+Theme readability improvements and volume label fix.
 
 ## Download
 
@@ -14,48 +14,27 @@ A small follow-up fix for v1.3.1.
 > Administrator rights are requested automatically (UAC) on startup, because
 > `diskpart`, `chkdsk`, ISO mounting and raw ISO writing require elevation.
 
-## What's new in 1.3.2
+## What's new in 1.3.3
 
-### Fixed: the update prompt could not be confirmed
+### Fixed: default volume label "Lunaci" on unnamed drives
+Unnamed USB/SD drives no longer get a default "LUNACI" volume label. They stay unnamed unless you explicitly set a label in the format options.
 
-When a new version was found, the confirmation window printed the **entire** release
-notes as its message. With longer notes the dialog grew taller than the screen, so the
-**Yes / Install** button was pushed off-screen and could not be clicked — the update
-could never be started from inside the app.
+### Improved dark theme readability (Telegram-inspired)
+- Button text contrast improved in dark mode so all buttons are easily readable.
+- Accent and segmented button colors adjusted for better WCAG contrast while keeping the Telegram-like look (blues on dark backgrounds).
+- Option menus and segmented controls now use high-contrast white text in dark theme.
 
-The prompt is now a proper window:
+## Everything from 1.3.2
 
-- A fixed heading shows the new and current version.
-- The release notes are shown in their own **scrollable** area, so any length fits.
-- **Download and Install** / **Later** buttons stay pinned at the bottom and are always
-  clickable; `Enter` confirms and `Esc` closes.
-- The window is centred and clamped to the screen, and the second "apply the update
-  now?" prompt is worded as a clear question.
+- Fixed update prompt that could grow too tall and push the Install button off-screen.
+- Proper scrollable release notes dialog.
 
-## Everything from 1.3.1
+## Everything from 1.3.1 and earlier
 
-- **One console instead of two panels** — the live file list and the timestamped log
-  share a single console; file rows stay as one block at the bottom while log lines flow
-  in above them.
-- **A single progress bar** — the duplicate transfer progress bar was removed.
-- **Readable buttons in dark mode** — the accent colour was deepened so white text
-  reaches WCAG AA (≥ 4.5:1) in both themes, and every accent button now uses white text.
-
-## Everything from 1.3.0
-
-- **Live transfer console** (now merged — see above).
-- **Bootable ISO writing** (Rufus-style): automatic mode detection, Windows `install.wim`
-  splitting to `install.swm`, `bootsect` + UEFI files for BIOS/UEFI boot.
-- **Automatic self-update from GitHub** with release notes and background download.
-- **Completion sound** (toggleable).
-- **Readability pass** over the dark and light themes.
-
-## Stability and performance
-
-- Rewritten, non-blocking device polling with plug/unplug events.
-- All long operations run off the UI thread and are safely cancellable.
-- Batched console updates keep the interface responsive under heavy output.
-- Diskpart/`chkdsk` calls have hard timeouts and a cancel watchdog.
+- Single console for logs and transfers.
+- Bootable ISO writing.
+- Auto-update from GitHub.
+- And more (see previous notes).
 
 ## Requirements
 
@@ -70,5 +49,4 @@ The prompt is now a proper window:
 
 ---
 
-Full change log: see `CHANGELOG` in the repository, or open **Check for Updates**
-inside the app.
+Full change log: see repository history.
