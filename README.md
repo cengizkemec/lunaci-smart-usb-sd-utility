@@ -20,7 +20,9 @@ single dark/light-themed desktop app with a live log console.
   default. FAT32 / NTFS / exFAT via `diskpart`, with **Quick** and **Full (sector-scan)**
   modes plus an automatic `clean + create partition` fallback when the direct format
   fails. Optional **auto quick-format before writing** (on by default).
-- **Volume label defaults to the device's current label** — rename it only if you want.
+- **Volume label stays empty for unnamed drives** — the current label is shown as the
+  starting value when the drive has one; otherwise the field is empty and the drive is
+  left unnamed unless you type a label.
 - **Write Folder to Disk** — copies the selected folder to the device root using a
   built-in fast engine or `robocopy`, with **live percentage and write speed** in the
   status bar and log console. Unchanged files (same size/mtime) are skipped. A
@@ -52,7 +54,8 @@ single dark/light-themed desktop app with a live log console.
   `chkdsk /f /r`; automatically recreates the partition on RAW disks.
 - **Turkish / English UI** — switch languages from the header; the choice is remembered.
 - **Dark / Light / System themes** — follows the Windows theme automatically. Both
-  themes are contrast-checked; log and transfer colours re-tune when you switch.
+  themes are audited with `tools/contrast_audit.py` (WCAG AA); log and transfer colours
+  re-tune when you switch.
 - **Console tools** — timestamped, colour-coded output (diskpart transcripts, copy
   percentages, errors); Clear and Save buttons.
 - **Reports** — every successful operation can be saved as a text report in the
@@ -106,6 +109,8 @@ py -m PyInstaller --noconfirm --clean lunaci.spec      # → dist\LunaciSmartUSB
 | `config_manager.py` | Settings, paths, version, resource lookup |
 | `utils.py` | Emitter/log records, subprocess helpers, elevation |
 | `lunaci.spec` / `setup.iss` | PyInstaller / Inno Setup build scripts |
+| `tools/selftest.py` | 68-check regression harness (safe, uses a virtual drive) |
+| `tools/contrast_audit.py` | WCAG AA contrast audit for both themes |
 
 ## Safety notes
 

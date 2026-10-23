@@ -88,6 +88,12 @@ class ConfigManager:
                 self.data.update(stored)
         except (OSError, ValueError):
             pass
+        # 1.3.3: eski surumlerin varsayilan "LUNACI" etiketi artik otomatik
+        # uygulanmiyor. Kayitli varsayilan degeri bir kez temizle; kullanici
+        # isterse bicimlendirme seceneklerinden yeni bir etiket girebilir.
+        if str(self.data.get("volume_label") or "").strip().upper() == "LUNACI":
+            self.data["volume_label"] = ""
+            self._dirty = True
 
     # ---- arka plan yazici ----
     def _writer_loop(self) -> None:

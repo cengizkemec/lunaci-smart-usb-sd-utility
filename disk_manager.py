@@ -471,7 +471,7 @@ def run_repair(logger: Emitter, letter: str,
         fs = dev2.suggested_fs()
         logger.warn(tr("rep.raw_warn"))
         logger.info(tr("rep.raw_fs", fs=fs))
-        if not run_format(logger, letter, fs, "LUNACI", quick=True,
+        if not run_format(logger, letter, fs, "", quick=True,
                           size_hint=dev2.size, cancel=cancel):
             return False
 

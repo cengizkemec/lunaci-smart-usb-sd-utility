@@ -2,7 +2,8 @@
 
 **Release date:** 2026-10-23
 
-Theme readability improvements and volume label fix.
+A readability and safety follow-up to v1.3.2 — unnamed drives are no longer forced to
+the "LUNACI" volume label, and both themes were re-audited against WCAG AA contrast.
 
 ## Download
 
@@ -16,25 +17,71 @@ Theme readability improvements and volume label fix.
 
 ## What's new in 1.3.3
 
-### Fixed: default volume label "Lunaci" on unnamed drives
-Unnamed USB/SD drives no longer get a default "LUNACI" volume label. They stay unnamed unless you explicitly set a label in the format options.
+### Fixed: unnamed drives no longer get a "LUNACI" label
 
-### Improved dark theme readability (Telegram-inspired)
-- Button text contrast improved in dark mode so all buttons are easily readable.
-- Accent and segmented button colors adjusted for better WCAG contrast while keeping the Telegram-like look (blues on dark backgrounds).
-- Option menus and segmented controls now use high-contrast white text in dark theme.
+- For a drive without a volume label the label field now starts **empty**, and the
+  drive stays unnamed unless you type a label yourself.
+- The automatically saved default from older versions (`LUNACI`) is **cleared once**
+  on the first launch after updating, so existing users do not silently relabel media.
+- The fix covers every place a format can happen: **Format**, **auto quick-format
+  before writing**, and **RAW-disk repair**.
+- A real label already present on the drive is still shown as the starting value and is
+  preserved unless you change it.
+
+### Readability: WCAG AA contrast re-audited in both themes
+
+- Every text/background pair was measured: primary, secondary and danger buttons, their
+  hover states, segmented controls, option menus, entries and placeholders, and all
+  console log levels.
+- Text stays at **≥ 4.5:1**; non-text indicators (checkbox/radio fills, progress bars,
+  switches) stay at **≥ 3:1**.
+- **Dark theme** keeps the Telegram-inspired look: the brighter accent (`#5288C1`) is
+  used for non-text elements, while buttons keep the deeper blue that keeps white text
+  readable.
+- **Light theme:** the selected segment now uses a light blue tint with dark text.
+  Previously dark text sat on the dark accent colour (only 3.1:1) and was hard to read.
+- Light-theme `INFO` and `WARN` log colours were darkened for the console background.
+- New repeatable check: `python tools/contrast_audit.py` reports every pair and fails on
+  a regression.
+
+### Build
+
+- Version bumped to **1.3.3** in the application and in the Inno Setup installer.
+- Portable EXE and installer rebuilt from the same sources and smoke-tested.
 
 ## Everything from 1.3.2
 
-- Fixed update prompt that could grow too tall and push the Install button off-screen.
-- Proper scrollable release notes dialog.
+- **Fixed the update prompt** that could grow taller than the screen and push the
+  Install button out of reach. It is now a proper window with a fixed heading, a
+  scrollable release-notes area, and always-visible **Download and Install / Later**
+  buttons (`Enter` confirms, `Esc` closes).
+- The dialog is centred and clamped to the screen.
 
-## Everything from 1.3.1 and earlier
+## Everything from 1.3.1
 
-- Single console for logs and transfers.
-- Bootable ISO writing.
-- Auto-update from GitHub.
-- And more (see previous notes).
+- **One console instead of two panels** — the live file list and the timestamped log
+  share a single console; file rows stay as one block at the bottom while log lines flow
+  in above them.
+- **A single progress bar** — the duplicate transfer progress bar was removed.
+- **Readable buttons in dark mode** — accent colours and white text reach WCAG AA.
+
+## Everything from 1.3.0
+
+- **Live transfer console** — every file is listed with size, status and per-file speed,
+  plus a running `done/total` summary.
+- **Bootable ISO writing (Rufus-style)** — automatic mode detection, Windows
+  `install.wim` splitting to `install.swm` (FAT32/UEFI), `bootsect` for BIOS boot, and a
+  raw (DD) mode for Linux/`isohybrid` images.
+- **Automatic self-update from GitHub** with release notes and a background download.
+- **Completion sound** (toggleable).
+- **Readability pass** over the dark and light themes.
+
+## Stability and performance
+
+- Non-blocking device polling with plug/unplug events.
+- All long operations run off the UI thread and are safely cancellable.
+- Batched console updates keep the interface responsive under heavy output.
+- `diskpart` / `chkdsk` calls have hard timeouts and a cancel watchdog.
 
 ## Requirements
 
@@ -45,8 +92,10 @@ Unnamed USB/SD drives no longer get a default "LUNACI" volume label. They stay u
 
 1. Plug in your USB stick or SD card — it is detected automatically.
 2. Pick a file system (defaults to the device's current one) and press **Format**.
+   Leave the label empty to keep the drive unnamed.
 3. Copy a folder, write an ISO, extract a ZIP, or run a health test.
 
 ---
 
-Full change log: see repository history.
+Full change log: see `CHANGELOG` in the repository, or open **Check for Updates**
+inside the app.
